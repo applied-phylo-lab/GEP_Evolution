@@ -1,0 +1,11 @@
+# simulate.py dependencies
+numpy>=1.24
+scipy>=1.10
+
+# figures.py dependencies
+matplotlib>=3.7
+
+# test_simulate.py dependencies (standard library only — no extra packages needed)
+
+# Optional: scikit-learn is NOT required (PCA implemented in numpy)
+# If you want to use sklearn elsewhere: scikit-learn>=1.2
