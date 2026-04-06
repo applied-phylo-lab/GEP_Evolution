@@ -60,35 +60,24 @@ from scipy.optimize import nnls
 # 0. SEED GENERATION
 # ============================================================
 
-def make_seed(rep: int, T: int, dT: float, m: int,
-              density: float, alpha: float, role: str) -> int:
-    """
-    Deterministic seed derived from condition parameters and replicate index.
-    role distinguishes genome initialization ('genome') from simulation ('sim')
-    so the two are independent even for the same condition and rep.
-    Robust to adding new conditions or reordering the parameter sweep.
-    """
-    key = f'{role}_{rep}_{T}_{dT}_{m}_{density}_{alpha}'
-    return int(hashlib.md5(key.encode()).hexdigest(), 16) % (2 ** 31)
-
 DEFAULTS = dict(
     N_POP=10_000,
     MU=1e-7,
     L=100,
-    K=6,
+    K=4,
     GAMMA=1.0,
     N_SUBS=1000,
-    N_REPS=40,
-    T_VALUES=[3, 6, 9],
+    N_REPS=50,
+    T_VALUES=[2, 4, 6, 8],
     M_VALUES=None,           # None -> [1, 2, ..., T] for each T
-    TASK_DIVERGENCES=[0.2, 0.6, 1.2],
+    TASK_DIVERGENCES=[0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4],
     TASK_ALPHAS=None,        # None -> calibrate alpha to hit TASK_DIVERGENCES
                              # explicit list -> use directly, bypasses dT targeting
                              # useful for sparse task robustness checks
-    GENOME_DENSITIES=None,   # None -> [1/K]
+    GENOME_DENSITIES=[0.1, 0.25, 0.5],   # None -> [1/K]
     TASK_SEED=270,
     CACHE_DIR='simulation_cache',
-    N_WORKERS=8,          # None -> os.cpu_count()
+    N_WORKERS=200,          # None -> os.cpu_count()
     N_GENOME_SNAPSHOTS=10,   # intermediate snapshots (excl. initial and final)
 )
 
@@ -163,6 +152,15 @@ def make_genome(L: int, K: int, density: float, seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
     return (rng.random((L, K)) < density).astype(float)
 
+def make_genome_seed(rep: int, L: int, K: int, density: float) -> int:
+    key = f'genome_{rep}_{L}_{K}_{density:.10g}'
+    return int(hashlib.md5(key.encode()).hexdigest(), 16) % (2 ** 31)
+
+
+def make_sim_seed(rep: int, T: int, dT: float, m: int,
+                  density: float, alpha: float) -> int:
+    key = f'sim_{rep}_{T}_{dT:.10g}_{m}_{density:.10g}_{alpha:.10g}'
+    return int(hashlib.md5(key.encode()).hexdigest(), 16) % (2 ** 31)
 
 # ============================================================
 # 4. PERFORMANCE
@@ -651,6 +649,12 @@ def _worker(args: tuple):
     Process pool worker. Runs N_REPS replicates for one
     (T, dT, m, density, alpha) condition and returns results.
     Called by ProcessPoolExecutor in run_simulations.
+
+    Initial genomes are controlled across conditions:
+    for a given (rep, density, L, K), the same starting genome is used
+    regardless of T, dT, m, or alpha.
+
+    Simulation seeds remain condition-specific.
     """
     (T, dT, m, density, alpha, tasks,
      n_subs, n_reps, mu, N_pop, gamma,
@@ -658,18 +662,20 @@ def _worker(args: tuple):
 
     results = []
     for rep in range(n_reps):
-        g0   = make_genome(L, K, density,
-                           seed=make_seed(rep, T, dT, m, density, alpha, 'genome'))
+        g0 = make_genome(
+            L, K, density,
+            seed=make_genome_seed(rep, L, K, density)
+        )
+
         hist = simulate(
             g0, tasks, n_subs, mu, N_pop, gamma,
             task_weights, m=m,
-            seed=make_seed(rep, T, dT, m, density, alpha, 'sim'),
+            seed=make_sim_seed(rep, T, dT, m, density, alpha),
             n_genome_snapshots=n_genome_snapshots,
         )
         results.append(hist)
 
     return T, dT, m, density, alpha, results
-
 
 # ============================================================
 # 12. MAIN RUNNER
