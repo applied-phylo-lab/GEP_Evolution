@@ -280,6 +280,96 @@ def compute_final_angproj_sem(reps: List[Dict], tasks: np.ndarray,
 
 
 # ============================================================
+# 6c. Usage metric helpers
+# ============================================================
+
+def cosine_dissim_usage(usage: np.ndarray) -> float:
+    """
+    Mean pairwise cosine dissimilarity across task usage vectors.
+    usage: (T, K), one row per task.
+    """
+    A = np.array(usage, dtype=float)
+    norms = np.linalg.norm(A, axis=1, keepdims=True)
+    norms = np.where(norms < 1e-12, 1.0, norms)
+    A = A / norms
+
+    vals = []
+    for i, j in combinations(range(A.shape[0]), 2):
+        vals.append(1.0 - float(np.dot(A[i], A[j])))
+    return float(np.mean(vals)) if vals else 0.0
+
+
+def mean_usage_entropy(usage: np.ndarray, normalize: bool = True) -> float:
+    """
+    Mean entropy across task usage vectors.
+    usage: (T, K), one row per task.
+    If normalize=True, divide by log(K) so range is roughly [0, 1].
+    """
+    A = np.array(usage, dtype=float)
+    K = A.shape[1]
+
+    row_sums = A.sum(axis=1, keepdims=True)
+    row_sums = np.where(row_sums < 1e-12, 1.0, row_sums)
+    P = A / row_sums
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        logP = np.where(P > 0, np.log(P), 0.0)
+    H = -np.sum(P * logP, axis=1)
+
+    if normalize and K > 1:
+        H = H / np.log(K)
+
+    return float(np.mean(H))
+
+
+def compute_final_usage_metric(
+    reps: List[Dict],
+    metric: str = "cosine",
+    entropy_normalize: bool = True,
+) -> float:
+    """
+    Mean across replicates of a usage-space metric at the final snapshot.
+    """
+    vals = []
+    for r in reps:
+        step = max(r["snapshots"].keys())
+        usage = r["snapshots"][step]["usage"]   # (T, K)
+
+        if metric == "cosine":
+            vals.append(cosine_dissim_usage(usage))
+        elif metric == "entropy":
+            vals.append(mean_usage_entropy(usage, normalize=entropy_normalize))
+        else:
+            raise ValueError("metric must be 'cosine' or 'entropy'")
+
+    return float(np.mean(vals)) if vals else np.nan
+
+
+def compute_final_usage_metric_sem(
+    reps: List[Dict],
+    metric: str = "cosine",
+    entropy_normalize: bool = True,
+) -> float:
+    """
+    SEM across replicates of a usage-space metric at the final snapshot.
+    """
+    vals = []
+    for r in reps:
+        step = max(r["snapshots"].keys())
+        usage = r["snapshots"][step]["usage"]
+
+        if metric == "cosine":
+            vals.append(cosine_dissim_usage(usage))
+        elif metric == "entropy":
+            vals.append(mean_usage_entropy(usage, normalize=entropy_normalize))
+        else:
+            raise ValueError("metric must be 'cosine' or 'entropy'")
+
+    if len(vals) < 2:
+        return 0.0
+    return float(np.std(vals, ddof=1) / np.sqrt(len(vals)))
+
+# ============================================================
 # 7. MAIN FIGURE
 # ============================================================
 
@@ -504,6 +594,128 @@ def fig_angproj(
 
     return fig
 
+# ============================================================
+# 7c. FIGURE 2: USAGE MECHANISM FIGURE
+# ============================================================
+
+def fig_usage_subset(
+    data: Dict,
+    data_cfg: DataConfig,
+    fig_cfg: FigureConfig,
+    subset_T_values: List[int],
+    subset_dT_values: List[float],
+    entropy_normalize: bool = True,
+    save_path: Optional[str] = None,
+):
+    """
+    2 × 2 figure:
+      columns = m=1, m=T
+      rows    = usage cosine dissimilarity, usage entropy
+
+      x = T/K for a chosen subset of T values
+      lines = chosen subset of dT values
+    """
+    regimes = fig_cfg.groups
+    if len(regimes) != 2:
+        raise ValueError("fig_usage_subset assumes exactly two groups: m=1 and m=T")
+
+    fig, axes = plt.subplots(2, 2, figsize=(9.0, 8.0))
+    fig.subplots_adjust(
+        hspace=0.30, wspace=0.22,
+        left=0.12, right=0.94, top=0.90, bottom=0.12
+    )
+
+    dt_color_map = make_dt_gray_map(subset_dT_values)
+    tk_values = np.array([T / data_cfg.K for T in subset_T_values], dtype=float)
+    panel_labels = "ABCDEFGH"
+
+    row_specs = [
+        ("cosine",  "Usage separation\n(mean cosine dissimilarity)"),
+        ("entropy", "Usage extremality\n(mean entropy)"),
+    ]
+
+    for col, group in enumerate(regimes):
+        for row, (metric, ylabel) in enumerate(row_specs):
+            ax = axes[row, col]
+            ax.set_box_aspect(1)
+
+            ax.text(-0.15, 1.08, panel_labels[row * 2 + col],
+                    transform=ax.transAxes, fontsize=14, fontweight="bold",
+                    va="top", ha="left")
+
+            if row == 0:
+                ax.set_title(group.label, fontsize=12, pad=6)
+
+            for dT in subset_dT_values:
+                color = dt_color_map[dT]
+                x_plot = []
+                y_means = []
+                y_sems = []
+
+                for T in subset_T_values:
+                    if T not in data or dT not in data[T] or not data[T][dT]:
+                        continue
+
+                    reps_by_m = data[T][dT]
+                    available_m = sorted(reps_by_m.keys())
+                    m = resolve_m_selector(group.m_selector, available_m, T)
+                    if m is None or m not in reps_by_m:
+                        continue
+
+                    reps = reps_by_m[m]
+                    mean_val = compute_final_usage_metric(
+                        reps,
+                        metric=metric,
+                        entropy_normalize=entropy_normalize,
+                    )
+                    sem_val = compute_final_usage_metric_sem(
+                        reps,
+                        metric=metric,
+                        entropy_normalize=entropy_normalize,
+                    )
+
+                    if np.isfinite(mean_val):
+                        x_plot.append(T / data_cfg.K)
+                        y_means.append(mean_val)
+                        y_sems.append(sem_val)
+
+                if x_plot:
+                    x_plot = np.array(x_plot)
+                    y_means = np.array(y_means)
+                    y_sems = np.array(y_sems)
+
+                    ax.plot(
+                        x_plot, y_means, "-o",
+                        color=color, lw=1.5, ms=5,
+                        label=rf"$\Delta T = {dT}$"
+                    )
+                    ax.fill_between(
+                        x_plot, y_means - y_sems, y_means + y_sems,
+                        color=color, alpha=0.12
+                    )
+
+            ax.set_xticks(tk_values)
+            ax.set_xticklabels([f"{x:.1f}" for x in tk_values])
+            ax.set_xlabel("T / K")
+
+            if col == 0:
+                ax.set_ylabel(ylabel)
+            else:
+                ax.tick_params(labelleft=False)
+
+            if metric == "cosine":
+                ax.set_ylim(0, 1.05)
+            elif metric == "entropy":
+                ax.set_ylim(0, 1.05 if entropy_normalize else None)
+
+    # shared grayscale legend/colorbar
+    _add_grayscale_colorbar(fig, subset_dT_values)
+
+    if save_path:
+        fig.savefig(save_path, bbox_inches="tight")
+        print(f"Saved: {save_path}")
+
+    return fig
 
 # ============================================================
 # 8. COLORBAR
@@ -633,6 +845,64 @@ def print_angproj_summary(
                     f"{val:>12.4f}  {sem:>10.4f}"
                 )
 
+# ============================================================
+# 9b. FIGURE 2 USAGE SUMMARY
+# ============================================================
+
+def print_usage_subset_summary(
+    data: Dict,
+    data_cfg: DataConfig,
+    fig_cfg: FigureConfig,
+    subset_T_values: List[int],
+    subset_dT_values: List[float],
+    entropy_normalize: bool = True,
+):
+    print(f"\n{'=' * 78}")
+    print("USAGE SUBSET SUMMARY")
+    print("=" * 78)
+
+    header = (
+        f"{'T/K':>6}  {'dT':>5}  {'group':>8}  {'m':>4}  "
+        f"{'cosine':>10}  {'cos_sem':>10}  "
+        f"{'entropy':>10}  {'ent_sem':>10}"
+    )
+    print(header)
+    print("-" * len(header))
+
+    for T in subset_T_values:
+        for dT in subset_dT_values:
+            if T not in data or dT not in data[T] or not data[T][dT]:
+                continue
+
+            reps_by_m = data[T][dT]
+            available_m = sorted(reps_by_m.keys())
+
+            for group in fig_cfg.groups:
+                m = resolve_m_selector(group.m_selector, available_m, T)
+                if m is None or m not in reps_by_m:
+                    continue
+
+                reps = reps_by_m[m]
+
+                cos_val = compute_final_usage_metric(reps, metric="cosine")
+                cos_sem = compute_final_usage_metric_sem(reps, metric="cosine")
+
+                ent_val = compute_final_usage_metric(
+                    reps,
+                    metric="entropy",
+                    entropy_normalize=entropy_normalize,
+                )
+                ent_sem = compute_final_usage_metric_sem(
+                    reps,
+                    metric="entropy",
+                    entropy_normalize=entropy_normalize,
+                )
+
+                print(
+                    f"{T / data_cfg.K:>6.1f}  {dT:>5.1f}  {group.label:>8}  {m:>4}  "
+                    f"{cos_val:>10.4f}  {cos_sem:>10.4f}  "
+                    f"{ent_val:>10.4f}  {ent_sem:>10.4f}"
+                )
 
 # ============================================================
 # 10. CLI
@@ -696,17 +966,23 @@ if __name__ == "__main__":
 
     os.makedirs(out_cfg.save_dir, exist_ok=True)
 
+    # -------------------------------------
+    # Loop over densities
+    # -------------------------------------
     for density in data_cfg.densities:
         print(f"\nLoading data for density={density:.4f}...")
 
         data, task_maps, _ = load_all_for_density(data_cfg, density)
 
+        # =====================================================
+        # Figure 1: main outcome (dZ/dT)
+        # =====================================================
         save_path = os.path.join(
             out_cfg.save_dir,
             f"{out_cfg.filename}_density{density:.4f}.{out_cfg.fmt}"
         )
 
-        print(f"Plotting density={density:.4f}...")
+        print(f"Plotting main figure for density={density:.4f}...")
         fig = fig_main(
             data=data,
             task_maps=task_maps,
@@ -715,11 +991,14 @@ if __name__ == "__main__":
             save_path=save_path,
         )
 
-        # Angular projection error figure
+        # =====================================================
+        # Angular projection error (companion)
+        # =====================================================
         angproj_path = os.path.join(
             out_cfg.save_dir,
             f"fig_angproj_density{density:.4f}.{out_cfg.fmt}"
         )
+
         print(f"Plotting angular projection error for density={density:.4f}...")
         fig_ang = fig_angproj(
             data=data,
@@ -730,13 +1009,55 @@ if __name__ == "__main__":
             save_path=angproj_path,
         )
 
+        # =====================================================
+        # Figure 2: usage mechanism (subset)
+        # =====================================================
+        subset_T_values = [2, 4, 8]         # T/K = 0.5, 1.0, 2.0
+        subset_dT_values = [0.4, 1.2, 1.4]
+
+        usage_path = os.path.join(
+            out_cfg.save_dir,
+            f"fig_usage_subset_density{density:.4f}.{out_cfg.fmt}"
+        )
+
+        print(f"Plotting usage subset figure for density={density:.4f}...")
+        fig_usage = fig_usage_subset(
+            data=data,
+            data_cfg=data_cfg,
+            fig_cfg=fig_cfg,
+            subset_T_values=subset_T_values,
+            subset_dT_values=subset_dT_values,
+            entropy_normalize=True,
+            save_path=usage_path,
+        )
+
+        # =====================================================
+        # Numerical summaries
+        # =====================================================
         if out_cfg.print_summary:
             print(f"\nSummary for density={density:.4f}")
-            print_numerical_summary(data, task_maps, data_cfg, fig_cfg)
-            print_angproj_summary(data, task_maps, data_cfg, fig_cfg, mode="mean")
 
+            print_numerical_summary(data, task_maps, data_cfg, fig_cfg)
+
+            print_angproj_summary(
+                data, task_maps, data_cfg, fig_cfg, mode="mean"
+            )
+
+            print_usage_subset_summary(
+                data=data,
+                data_cfg=data_cfg,
+                fig_cfg=fig_cfg,
+                subset_T_values=subset_T_values,
+                subset_dT_values=subset_dT_values,
+                entropy_normalize=True,
+            )
+
+        # =====================================================
+        # Show or close
+        # =====================================================
         if out_cfg.show:
             plt.show()
         else:
             plt.close(fig)
             plt.close(fig_ang)
+            plt.close(fig_usage)

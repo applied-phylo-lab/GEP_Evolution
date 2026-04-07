@@ -67,18 +67,19 @@ DEFAULTS = dict(
     K=4,
     GAMMA=1.0,
     N_SUBS=1000,
-    N_REPS=40,
+    N_REPS=50,
     T_VALUES=[2, 3, 4, 6, 8],
     M_VALUES=None,           # None -> [1, 2, ..., T] for each T
     TASK_DIVERGENCES=[0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4],
     TASK_ALPHAS=None,        # None -> calibrate alpha to hit TASK_DIVERGENCES
                              # explicit list -> use directly, bypasses dT targeting
                              # useful for sparse task robustness checks
-    GENOME_DENSITIES=[0.25, 0.5],   # None -> [1/K]
+    GENOME_DENSITIES=[0.25, 0.50],   # None -> [1/K]
     TASK_SEED=270,
     CACHE_DIR='simulation_cache',
-    N_WORKERS=8,          # None -> os.cpu_count()
+    N_WORKERS=200,          # None -> os.cpu_count()
     N_GENOME_SNAPSHOTS=10,   # intermediate snapshots (excl. initial and final)
+    TASK_SAMPLING='sliding',  # 'random' or 'sliding' (deterministic cyclic window)
 )
 
 
@@ -344,6 +345,7 @@ def _run_sswm(
     w: np.ndarray,
     seed: int,
     n_genome_snapshots: int = 10,
+    task_sampling: str = 'random',
 ) -> Dict:
     """
     Unified SSWM engine for all simultaneity levels.
@@ -351,8 +353,13 @@ def _run_sswm(
     m == 1  : pure sequential (unicellular)
     1 < m < T: partial simultaneity
 
-    At each step, m tasks are drawn without replacement.
-    Fitness = geometric mean over those m tasks.
+    At each step, m tasks are selected. Task selection mode:
+      'random'  : m tasks drawn uniformly without replacement (default)
+      'sliding' : deterministic cyclic window of m consecutive tasks,
+                  advancing by 1 each step. Tasks are arranged in a
+                  cycle [0, 1, ..., T-1, 0, 1, ...].
+
+    Fitness = geometric mean over the active m tasks.
     """
     rng = np.random.default_rng(seed)
     L, K = genome_init.shape
@@ -390,7 +397,10 @@ def _run_sswm(
         # draw active task subset
         if m == n_tasks:
             active = np.arange(n_tasks)
-        else:
+        elif task_sampling == 'sliding':
+            start = step % n_tasks
+            active = np.array([i % n_tasks for i in range(start, start + m)])
+        else:  # 'random'
             active = rng.choice(n_tasks, size=m, replace=False)
 
         w_active = w[active] / w[active].sum()
@@ -478,13 +488,18 @@ def _run_sswm(
 def simulate(genome_init: np.ndarray, tasks: np.ndarray,
              n_subs: int, mu: float, N: int, gamma: float,
              task_weights: np.ndarray, m: int, seed: int,
-             n_genome_snapshots: int = 10) -> Dict:
+             n_genome_snapshots: int = 10,
+             task_sampling: str = 'random') -> Dict:
     """
     Public entry point for all simultaneity regimes.
 
-    m=1    : purely sequential — one task drawn per substitution (unicellular)
-    m=T    : fully simultaneous — all tasks evaluated jointly (multicellular)
-    1<m<T  : partial simultaneity — m tasks drawn without replacement per step
+    m=1    : purely sequential — one task selected per substitution
+    m=T    : fully simultaneous — all tasks evaluated jointly
+    1<m<T  : partial simultaneity — m tasks selected per step
+
+    task_sampling:
+      'random'  : m tasks drawn uniformly without replacement (default)
+      'sliding' : deterministic cyclic window of m consecutive tasks
 
     task_weights are normalized internally; uniform weights are appropriate
     for the standard sweep.
@@ -494,6 +509,7 @@ def simulate(genome_init: np.ndarray, tasks: np.ndarray,
         genome_init, tasks, n_subs, mu, N, gamma,
         m=m, w=w, seed=seed,
         n_genome_snapshots=n_genome_snapshots,
+        task_sampling=task_sampling,
     )
 
 
@@ -649,14 +665,18 @@ def _worker(args: tuple):
     """
     Process pool worker. Runs N_REPS replicates for one
     (T, dT, m, density, alpha) condition and returns results.
+    Called by ProcessPoolExecutor in run_simulations.
 
-    Initial genome is identical for all replicates and conditions
-    sharing the same (L, K, density). Only the simulation seed
-    varies across replicates and conditions.
+    Initial genomes are controlled across conditions:
+    for a given (rep, density, L, K), the same starting genome is used
+    regardless of T, dT, m, or alpha.
+
+    Simulation seeds remain condition-specific.
     """
     (T, dT, m, density, alpha, tasks,
      n_subs, n_reps, mu, N_pop, gamma,
-     K, L, task_weights, n_genome_snapshots) = args
+     K, L, task_weights, n_genome_snapshots,
+     task_sampling) = args
 
     results = []
     for rep in range(n_reps):
@@ -670,6 +690,7 @@ def _worker(args: tuple):
             task_weights, m=m,
             seed=make_sim_seed(rep, T, dT, m, density, alpha),
             n_genome_snapshots=n_genome_snapshots,
+            task_sampling=task_sampling,
         )
         results.append(hist)
 
@@ -695,6 +716,7 @@ def run_simulations(cfg: dict):
     n_workers = cfg['N_WORKERS'] or os.cpu_count()
     n_snaps   = cfg['N_GENOME_SNAPSHOTS']
     densities = cfg['GENOME_DENSITIES'] or [1.0 / K]
+    task_sampling = cfg.get('TASK_SAMPLING', 'random')
 
     os.makedirs(cache_dir, exist_ok=True)
 
@@ -746,6 +768,7 @@ def run_simulations(cfg: dict):
                         T, dT, m, density, alpha, tasks,
                         n_subs, n_reps, mu, N_pop, gamma,
                         K, L, task_weights, n_snaps,
+                        task_sampling,
                     ))
 
     if not work:
@@ -765,9 +788,9 @@ def run_simulations(cfg: dict):
             except Exception as exc:
                 args_failed = futures[fut]
                 raise RuntimeError(
-                    f'Worker crashed: T={args_failed[0]} dT={args_failed[1]} '
-                    f'm={args_failed[2]} density={args_failed[3]:.4f} '
-                    f'alpha={args_failed[4]:.4f}'
+                    f"Worker crashed: T={args_failed[0]} dT={args_failed[1]} "
+                    f"m={args_failed[2]} density={args_failed[3]:.4f} "
+                    f"alpha={args_failed[4]:.4f}"
                 ) from exc
             spath = sim_cache_path(
                 cache_dir, L, K, gamma, density, T, dT, m, alpha)
@@ -776,7 +799,8 @@ def run_simulations(cfg: dict):
                           N_SUBS=n_subs, N_REPS=n_reps,
                           MU=mu, N_POP=N_pop,
                           TASK_SEED=task_seed,
-                          N_GENOME_SNAPSHOTS=n_snaps)
+                          N_GENOME_SNAPSHOTS=n_snaps,
+                          TASK_SAMPLING=task_sampling)
             save_condition(spath, results, params)
             print(f'  Saved T={T} dT={dT} m={m} '
                   f'alpha={alpha:.4f} density={density:.4f}  '
@@ -816,6 +840,11 @@ def parse_args():
     p.add_argument('--workers',   type=int,   default=DEFAULTS['N_WORKERS'])
     p.add_argument('--n_snaps',   type=int,
                    default=DEFAULTS['N_GENOME_SNAPSHOTS'])
+    p.add_argument('--task_sampling', type=str,
+                   default=DEFAULTS['TASK_SAMPLING'],
+                   choices=['random', 'sliding'],
+                   help="Task selection mode: 'random' (uniform draw) "
+                        "or 'sliding' (deterministic cyclic window).")
     return p.parse_args()
 
 
@@ -838,5 +867,6 @@ if __name__ == '__main__':
         'CACHE_DIR':          args.cache_dir,
         'N_WORKERS':          args.workers,
         'N_GENOME_SNAPSHOTS': args.n_snaps,
+        'TASK_SAMPLING':      args.task_sampling,
     }
     run_simulations(cfg)
