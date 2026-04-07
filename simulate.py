@@ -67,17 +67,17 @@ DEFAULTS = dict(
     K=4,
     GAMMA=1.0,
     N_SUBS=1000,
-    N_REPS=50,
-    T_VALUES=[2, 4, 6, 8],
+    N_REPS=40,
+    T_VALUES=[2, 3, 4, 6, 8],
     M_VALUES=None,           # None -> [1, 2, ..., T] for each T
     TASK_DIVERGENCES=[0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4],
     TASK_ALPHAS=None,        # None -> calibrate alpha to hit TASK_DIVERGENCES
                              # explicit list -> use directly, bypasses dT targeting
                              # useful for sparse task robustness checks
-    GENOME_DENSITIES=[0.1, 0.25, 0.5],   # None -> [1/K]
+    GENOME_DENSITIES=[0.25, 0.5],   # None -> [1/K]
     TASK_SEED=270,
     CACHE_DIR='simulation_cache',
-    N_WORKERS=200,          # None -> os.cpu_count()
+    N_WORKERS=8,          # None -> os.cpu_count()
     N_GENOME_SNAPSHOTS=10,   # intermediate snapshots (excl. initial and final)
 )
 
@@ -109,9 +109,10 @@ def find_alpha_for_target(target_dist: float, L: int, T: int,
     lo, hi = 0.01, 100.0
     for _ in range(50):
         mid = np.sqrt(lo * hi)
-        if abs(mean_dist(mid) - target_dist) < tol:
+        val = mean_dist(mid)
+        if abs(val - target_dist) < tol:
             return mid
-        if mean_dist(mid) > target_dist:
+        if val > target_dist:
             lo = mid
         else:
             hi = mid
@@ -152,8 +153,8 @@ def make_genome(L: int, K: int, density: float, seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
     return (rng.random((L, K)) < density).astype(float)
 
-def make_genome_seed(rep: int, L: int, K: int, density: float) -> int:
-    key = f'genome_{rep}_{L}_{K}_{density:.10g}'
+def make_genome_seed(L: int, K: int, density: float) -> int:
+    key = f'genome_{L}_{K}_{density:.10g}'
     return int(hashlib.md5(key.encode()).hexdigest(), 16) % (2 ** 31)
 
 
@@ -441,7 +442,7 @@ def _run_sswm(
 
         # substitution
         pfix_vals = np.array([b[3] for b in beneficial])
-        lambda_tot = mu * pfix_vals.sum()
+        lambda_tot = N * mu * pfix_vals.sum()
         wait = rng.exponential(1.0 / lambda_tot)
         hist['wait_time'].append(wait)
         cumtime += wait
@@ -648,13 +649,10 @@ def _worker(args: tuple):
     """
     Process pool worker. Runs N_REPS replicates for one
     (T, dT, m, density, alpha) condition and returns results.
-    Called by ProcessPoolExecutor in run_simulations.
 
-    Initial genomes are controlled across conditions:
-    for a given (rep, density, L, K), the same starting genome is used
-    regardless of T, dT, m, or alpha.
-
-    Simulation seeds remain condition-specific.
+    Initial genome is identical for all replicates and conditions
+    sharing the same (L, K, density). Only the simulation seed
+    varies across replicates and conditions.
     """
     (T, dT, m, density, alpha, tasks,
      n_subs, n_reps, mu, N_pop, gamma,
@@ -664,7 +662,7 @@ def _worker(args: tuple):
     for rep in range(n_reps):
         g0 = make_genome(
             L, K, density,
-            seed=make_genome_seed(rep, L, K, density)
+            seed=make_genome_seed(L, K, density)
         )
 
         hist = simulate(
@@ -762,7 +760,15 @@ def run_simulations(cfg: dict):
         futures = {executor.submit(_worker, a): a for a in work}
 
         for fut in as_completed(futures):
-            T, dT, m, density, alpha, results = fut.result()
+            try:
+                T, dT, m, density, alpha, results = fut.result()
+            except Exception as exc:
+                args_failed = futures[fut]
+                raise RuntimeError(
+                    f'Worker crashed: T={args_failed[0]} dT={args_failed[1]} '
+                    f'm={args_failed[2]} density={args_failed[3]:.4f} '
+                    f'alpha={args_failed[4]:.4f}'
+                ) from exc
             spath = sim_cache_path(
                 cache_dir, L, K, gamma, density, T, dT, m, alpha)
             params = dict(T=T, dT=dT, m=m, density=density, alpha=alpha,
