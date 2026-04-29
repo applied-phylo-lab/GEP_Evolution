@@ -58,7 +58,8 @@ class DataConfig:
     L: int = 100
     K: int = 4
     gamma: float = 1.0
-    densities: List[float] = field(default_factory=lambda: [0.25, 0.5])
+    fitness_r: float = 0.0
+    densities: List[float] = field(default_factory=lambda: [0.25])
     T_values: List[int] = field(default_factory=lambda: [2, 3, 4, 6, 8])
     task_divs: List[float] = field(default_factory=lambda: [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4])
 
@@ -145,7 +146,7 @@ def load_all_for_density(cfg: DataConfig, density: float):
 
     for T in cfg.T_values:
         data[T] = {}
-        tpath = task_cache_path(cfg.cache_dir, cfg.L, cfg.K, cfg.gamma, T)
+        tpath = task_cache_path(cfg.cache_dir, cfg.L, cfg.K, cfg.gamma, cfg.fitness_r, T)
         tpath_meta = tpath + "_meta.json"
 
         task_maps[T] = load_task_map(tpath) if os.path.exists(tpath + ".npz") else {}
@@ -167,7 +168,7 @@ def load_all_for_density(cfg: DataConfig, density: float):
             alpha = alpha_map[dT]
             for m in range(1, T + 1):
                 sp = sim_cache_path(
-                    cfg.cache_dir, cfg.L, cfg.K, cfg.gamma,
+                    cfg.cache_dir, cfg.L, cfg.K, cfg.gamma, cfg.fitness_r,
                     density, T, dT, m, alpha
                 )
                 if os.path.exists(sp + ".npz"):
@@ -379,6 +380,7 @@ def parse_args():
     p.add_argument("--L",          type=int,   default=d_cfg.L)
     p.add_argument("--K",          type=int,   default=d_cfg.K)
     p.add_argument("--gamma",      type=float, default=d_cfg.gamma)
+    p.add_argument("--fitness_r",  type=float, default=d_cfg.fitness_r)
     p.add_argument("--densities",  type=float, nargs="+", default=d_cfg.densities)
     p.add_argument("--T",          type=int,   nargs="+", default=d_cfg.T_values,  dest="T_values")
     p.add_argument("--dT",         type=float, nargs="+", default=d_cfg.task_divs, dest="task_divs")
@@ -399,6 +401,7 @@ if __name__ == "__main__":
         L=args.L,
         K=args.K,
         gamma=args.gamma,
+        fitness_r=args.fitness_r,
         densities=args.densities,
         T_values=args.T_values,
         task_divs=args.task_divs,
@@ -418,13 +421,15 @@ if __name__ == "__main__":
         print(f"\nLoading data for density={density:.4f}...")
         data, task_maps, _ = load_all_for_density(data_cfg, density)
 
+        tag = f"_gamma{data_cfg.gamma}_fr{data_cfg.fitness_r}_density{density:.4f}"
+
         # Figure 1: rows=T/K, cols=m=1|m=T
         fig = fig_trajectories(
             data=data, task_maps=task_maps,
             data_cfg=data_cfg, fig_cfg=fig_cfg,
             save_path=os.path.join(
                 out_cfg.save_dir,
-                f"{out_cfg.filename}_density{density:.4f}.{out_cfg.fmt}"
+                f"{out_cfg.filename}{tag}.{out_cfg.fmt}"
             ),
         )
 
@@ -435,7 +440,7 @@ if __name__ == "__main__":
             target_tk=0.8,
             save_path=os.path.join(
                 out_cfg.save_dir,
-                f"{out_cfg.filename}_m_sweep_tk0.8_density{density:.4f}.{out_cfg.fmt}"
+                f"{out_cfg.filename}_m_sweep_tk0.8{tag}.{out_cfg.fmt}"
             ),
         )
 
@@ -446,7 +451,7 @@ if __name__ == "__main__":
             target_tk=2.0,
             save_path=os.path.join(
                 out_cfg.save_dir,
-                f"{out_cfg.filename}_m_sweep_tk2.0_density{density:.4f}.{out_cfg.fmt}"
+                f"{out_cfg.filename}_m_sweep_tk2.0{tag}.{out_cfg.fmt}"
             ),
         )
 

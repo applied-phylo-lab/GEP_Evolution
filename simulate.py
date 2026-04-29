@@ -25,7 +25,7 @@ Global parameters (all tunable via CLI):
 
 Cache layout:
   simulation_cache/
-    L{L}_K{K}_gamma{GAMMA}/
+    L{L}_K{K}_gamma{GAMMA}_fr{FITNESS_R}/
       tasks_T{T}.npz                             <- task vectors, once per T
       tasks_T{T}_meta.json
       density{DENSITY}/
@@ -36,6 +36,8 @@ Snapshot structure (identical for initial, intermediate, final timepoints):
   genome   : (L, K) binary array
   usage    : (T, K) activation vectors, one row per task
   phenotype: (L, T) expressed phenotypes G @ a_j, one column per task
+  cum_time : float, cumulative evolutionary time at the moment this genome
+             was the current state (i.e. time of its fixation)
 
 Usage:
   python simulate.py
@@ -66,7 +68,7 @@ DEFAULTS = dict(
     L=100,
     K=4,
     GAMMA=1.0,
-    N_SUBS=1000,
+    N_SUBS=500,
     N_REPS=50,
     T_VALUES=[2, 3, 4, 6, 8],
     M_VALUES=None,           # None -> [1, 2, ..., T] for each T
@@ -74,12 +76,14 @@ DEFAULTS = dict(
     TASK_ALPHAS=None,        # None -> calibrate alpha to hit TASK_DIVERGENCES
                              # explicit list -> use directly, bypasses dT targeting
                              # useful for sparse task robustness checks
-    GENOME_DENSITIES=[0.25, 0.50],   # None -> [1/K]
+    GENOME_DENSITIES=[0.25],   # None -> [1/K]
     TASK_SEED=270,
     CACHE_DIR='simulation_cache',
-    N_WORKERS=200,          # None -> os.cpu_count()
+    N_WORKERS=100,          # None -> os.cpu_count()
     N_GENOME_SNAPSHOTS=10,   # intermediate snapshots (excl. initial and final)
-    TASK_SAMPLING='sliding',  # 'random' or 'sliding' (deterministic cyclic window)
+    TASK_SAMPLING='random',  # 'random' or 'sliding' (deterministic cyclic window)
+    FITNESS_R=0.0,           # power mean exponent: 0.0 = geometric mean (limit),
+                             # >0 = soft-max direction, <0 = soft-min direction
 )
 
 
@@ -217,11 +221,27 @@ def make_snapshot(genome: np.ndarray, tasks: np.ndarray, gamma: float) -> Dict:
 # 5. FITNESS
 # ============================================================
 
-def fitness_geometric(P: np.ndarray, w: np.ndarray) -> float:
-    """Weighted geometric mean of task performances. Returns 0 if any P <= 0."""
-    if np.any(P <= 0):
-        return 0.0
-    return float(np.exp(np.sum(w * np.log(P))))
+def fitness_power_mean(P: np.ndarray, w: np.ndarray, r: float) -> float:
+    """
+    Weighted power mean of task performances with exponent r.
+
+    r = 0.0  : geometric mean (exact limit of power mean as r -> 0).
+               Returns 0 if any P <= 0.
+    r > 0    : soft-max direction; larger r weights the best task more.
+    r < 0    : soft-min direction; more negative r weights the worst task more.
+               Returns 0 if any P <= 0 (log-domain protection for negative r).
+
+    For any r, returns 0 if P contains non-positive values and r <= 0,
+    since those cases are either undefined (log) or yield 0 (0^r for r<0 -> inf).
+    """
+    if r == 0.0:
+        if np.any(P <= 0):
+            return 0.0
+        return float(np.exp(np.sum(w * np.log(P))))
+    else:
+        if np.any(P <= 0) and r < 0:
+            return 0.0
+        return float(np.power(np.sum(w * np.power(P, r)), 1.0 / r))
 
 
 # ============================================================
@@ -346,6 +366,7 @@ def _run_sswm(
     seed: int,
     n_genome_snapshots: int = 10,
     task_sampling: str = 'random',
+    fitness_r: float = 0.0,
 ) -> Dict:
     """
     Unified SSWM engine for all simultaneity levels.
@@ -359,17 +380,23 @@ def _run_sswm(
                   advancing by 1 each step. Tasks are arranged in a
                   cycle [0, 1, ..., T-1, 0, 1, ...].
 
-    Fitness = geometric mean over the active m tasks.
+    Fitness = weighted power mean of task performances with exponent fitness_r.
+      fitness_r = 0.0 : geometric mean (default)
+      fitness_r > 0   : soft-max direction
+      fitness_r < 0   : soft-min direction
     """
     rng = np.random.default_rng(seed)
     L, K = genome_init.shape
     n_tasks = tasks.shape[1]
 
-    # snapshot step indices: n_genome_snapshots intermediate + initial + final
-    snap_steps = set(
-        np.linspace(0, n_subs - 1, n_genome_snapshots + 2, dtype=int)
-    )
-    snap_steps |= {0, n_subs - 1}
+    # Snapshot scheduling: thresholds are evenly spaced over [0, n_subs),
+    # so snapshots are taken at steps 0, ~n_subs/(n+1), ~2*n_subs/(n+1), ...
+    # Step 0 is always captured (threshold starts at 0.0).
+    # Replicates that stall early will only hit the thresholds that fall
+    # within their actual run length; the final step is always guaranteed
+    # by a post-loop check regardless of when the replicate stops.
+    snap_interval = n_subs / (n_genome_snapshots + 1)
+    next_snap_threshold = 0.0
 
     hist = {
         'eff_rank':           [],
@@ -404,7 +431,7 @@ def _run_sswm(
             active = rng.choice(n_tasks, size=m, replace=False)
 
         w_active = w[active] / w[active].sum()
-        W_wt = fitness_geometric(P_wt[active], w_active)
+        W_wt = fitness_power_mean(P_wt[active], w_active, fitness_r)
 
         # record trajectory
         hist['eff_rank'].append(effective_rank(info_wt['a']))
@@ -416,9 +443,12 @@ def _run_sswm(
         hist['pheno_dist'].append(
             mean_pairwise_phenotype_distance(info_wt['phenotype']))
 
-        # snapshot
-        if step in snap_steps:
-            snapshots[step] = make_snapshot(genome, tasks, gamma)
+        # snapshot: trigger when step crosses next evenly-spaced threshold
+        if step >= next_snap_threshold:
+            snap = make_snapshot(genome, tasks, gamma)
+            snap['cum_time'] = cumtime
+            snapshots[step] = snap
+            next_snap_threshold += snap_interval
 
         # evaluate all L*K mutations
         dF_all = np.zeros((L * K, n_tasks))
@@ -430,7 +460,7 @@ def _run_sswm(
                 mut[i, j] = 1.0 - mut[i, j]
                 info_mut = compute_performance(mut, tasks, gamma)
                 dF_all[idx] = info_mut['P'] - P_wt
-                W_mut = fitness_geometric(info_mut['P'][active], w_active)
+                W_mut = fitness_power_mean(info_mut['P'][active], w_active, fitness_r)
                 s = selection_coeff(W_mut, W_wt)
                 if s > 0:
                     beneficial.append((i, j, s, p_fix(s, N), mut))
@@ -468,7 +498,9 @@ def _run_sswm(
     # ensure final snapshot is always saved
     final_step = actual_subs - 1
     if final_step not in snapshots:
-        snapshots[final_step] = make_snapshot(genome, tasks, gamma)
+        snap = make_snapshot(genome, tasks, gamma)
+        snap['cum_time'] = cumtime
+        snapshots[final_step] = snap
 
     # convert lists to arrays
     for key in hist:
@@ -489,7 +521,8 @@ def simulate(genome_init: np.ndarray, tasks: np.ndarray,
              n_subs: int, mu: float, N: int, gamma: float,
              task_weights: np.ndarray, m: int, seed: int,
              n_genome_snapshots: int = 10,
-             task_sampling: str = 'random') -> Dict:
+             task_sampling: str = 'random',
+             fitness_r: float = 0.0) -> Dict:
     """
     Public entry point for all simultaneity regimes.
 
@@ -501,6 +534,11 @@ def simulate(genome_init: np.ndarray, tasks: np.ndarray,
       'random'  : m tasks drawn uniformly without replacement (default)
       'sliding' : deterministic cyclic window of m consecutive tasks
 
+    fitness_r: power mean exponent for fitness aggregation over tasks.
+      0.0  -> geometric mean (default)
+      >0   -> soft-max direction
+      <0   -> soft-min direction
+
     task_weights are normalized internally; uniform weights are appropriate
     for the standard sweep.
     """
@@ -510,6 +548,7 @@ def simulate(genome_init: np.ndarray, tasks: np.ndarray,
         m=m, w=w, seed=seed,
         n_genome_snapshots=n_genome_snapshots,
         task_sampling=task_sampling,
+        fitness_r=fitness_r,
     )
 
 
@@ -517,30 +556,32 @@ def simulate(genome_init: np.ndarray, tasks: np.ndarray,
 # 10. CACHE HELPERS
 # ============================================================
 
-def _param_root(cache_dir: str, L: int, K: int, gamma: float) -> str:
-    folder = os.path.join(cache_dir, f'L{L}_K{K}_gamma{gamma}')
+def _param_root(cache_dir: str, L: int, K: int, gamma: float,
+                fitness_r: float) -> str:
+    folder = os.path.join(cache_dir, f'L{L}_K{K}_gamma{gamma}_fr{fitness_r}')
     os.makedirs(folder, exist_ok=True)
     return folder
 
 
 def _density_root(cache_dir: str, L: int, K: int, gamma: float,
-                  density: float) -> str:
-    folder = os.path.join(_param_root(cache_dir, L, K, gamma),
+                  fitness_r: float, density: float) -> str:
+    folder = os.path.join(_param_root(cache_dir, L, K, gamma, fitness_r),
                           f'density{density:.4f}')
     os.makedirs(folder, exist_ok=True)
     return folder
 
 
 def task_cache_path(cache_dir: str, L: int, K: int, gamma: float,
-                    T: int) -> str:
-    return os.path.join(_param_root(cache_dir, L, K, gamma), f'tasks_T{T}')
+                    fitness_r: float, T: int) -> str:
+    return os.path.join(_param_root(cache_dir, L, K, gamma, fitness_r),
+                        f'tasks_T{T}')
 
 
 def sim_cache_path(cache_dir: str, L: int, K: int, gamma: float,
-                   density: float, T: int, dT: float, m: int,
-                   alpha: float) -> str:
+                   fitness_r: float, density: float, T: int, dT: float,
+                   m: int, alpha: float) -> str:
     return os.path.join(
-        _density_root(cache_dir, L, K, gamma, density),
+        _density_root(cache_dir, L, K, gamma, fitness_r, density),
         f'sim_T{T}_dT{dT}_m{m}_alpha{alpha:.4f}'
     )
 
@@ -577,6 +618,7 @@ def _flatten_snapshots(snapshots: Dict[int, Dict]) -> Dict[str, np.ndarray]:
         flat[f'snap_{step}_genome']    = snap['genome']
         flat[f'snap_{step}_usage']     = snap['usage']
         flat[f'snap_{step}_phenotype'] = snap['phenotype']
+        flat[f'snap_{step}_cum_time']  = np.array([snap['cum_time']])
     return flat
 
 
@@ -587,6 +629,7 @@ def _unflatten_snapshots(arrays: Dict, step_keys: List[int]) -> Dict[int, Dict]:
             'genome':    arrays[f'snap_{step}_genome'],
             'usage':     arrays[f'snap_{step}_usage'],
             'phenotype': arrays[f'snap_{step}_phenotype'],
+            'cum_time':  float(arrays[f'snap_{step}_cum_time'][0]),
         }
         for step in step_keys
     }
@@ -668,15 +711,15 @@ def _worker(args: tuple):
     Called by ProcessPoolExecutor in run_simulations.
 
     Initial genomes are controlled across conditions:
-    for a given (rep, density, L, K), the same starting genome is used
+    for a given (density, L, K), the same starting genome is used
     regardless of T, dT, m, or alpha.
 
-    Simulation seeds remain condition-specific.
+    Simulation seeds are condition- and replicate-specific.
     """
     (T, dT, m, density, alpha, tasks,
      n_subs, n_reps, mu, N_pop, gamma,
      K, L, task_weights, n_genome_snapshots,
-     task_sampling) = args
+     task_sampling, fitness_r) = args
 
     results = []
     for rep in range(n_reps):
@@ -691,6 +734,7 @@ def _worker(args: tuple):
             seed=make_sim_seed(rep, T, dT, m, density, alpha),
             n_genome_snapshots=n_genome_snapshots,
             task_sampling=task_sampling,
+            fitness_r=fitness_r,
         )
         results.append(hist)
 
@@ -704,6 +748,7 @@ def run_simulations(cfg: dict):
     L         = cfg['L']
     K         = cfg['K']
     gamma     = cfg['GAMMA']
+    fitness_r = cfg.get('FITNESS_R', 0.0)
     n_subs    = cfg['N_SUBS']
     n_reps    = cfg['N_REPS']
     mu        = cfg['MU']
@@ -724,7 +769,7 @@ def run_simulations(cfg: dict):
     task_maps  = {}
     alpha_maps = {}
     for T in T_values:
-        tpath = task_cache_path(cache_dir, L, K, gamma, T)
+        tpath = task_cache_path(cache_dir, L, K, gamma, fitness_r, T)
         if os.path.exists(tpath + '.npz') and task_alphas is None:
             task_maps[T] = load_task_map(tpath)
             with open(tpath + '_meta.json') as f:
@@ -758,7 +803,7 @@ def run_simulations(cfg: dict):
 
                 for density in densities:
                     spath = sim_cache_path(
-                        cache_dir, L, K, gamma, density, T, dT, m, alpha)
+                        cache_dir, L, K, gamma, fitness_r, density, T, dT, m, alpha)
                     if os.path.exists(spath + '.npz'):
                         print(f'Skip (cached): T={T} dT={dT} m={m} '
                               f'alpha={alpha:.4f} density={density:.4f}')
@@ -768,7 +813,7 @@ def run_simulations(cfg: dict):
                         T, dT, m, density, alpha, tasks,
                         n_subs, n_reps, mu, N_pop, gamma,
                         K, L, task_weights, n_snaps,
-                        task_sampling,
+                        task_sampling, fitness_r,
                     ))
 
     if not work:
@@ -793,9 +838,10 @@ def run_simulations(cfg: dict):
                     f"alpha={args_failed[4]:.4f}"
                 ) from exc
             spath = sim_cache_path(
-                cache_dir, L, K, gamma, density, T, dT, m, alpha)
+                cache_dir, L, K, gamma, fitness_r, density, T, dT, m, alpha)
             params = dict(T=T, dT=dT, m=m, density=density, alpha=alpha,
                           L=L, K=K, GAMMA=gamma,
+                          FITNESS_R=fitness_r,
                           N_SUBS=n_subs, N_REPS=n_reps,
                           MU=mu, N_POP=N_pop,
                           TASK_SEED=task_seed,
@@ -845,6 +891,10 @@ def parse_args():
                    choices=['random', 'sliding'],
                    help="Task selection mode: 'random' (uniform draw) "
                         "or 'sliding' (deterministic cyclic window).")
+    p.add_argument('--fitness_r', type=float, default=DEFAULTS['FITNESS_R'],
+                   help='Power mean exponent for fitness aggregation over tasks. '
+                        '0.0 = geometric mean (default); '
+                        '>0 = soft-max direction; <0 = soft-min direction.')
     return p.parse_args()
 
 
@@ -854,6 +904,7 @@ if __name__ == '__main__':
         'L':                  args.L,
         'K':                  args.K,
         'GAMMA':              args.gamma,
+        'FITNESS_R':          args.fitness_r,
         'T_VALUES':           args.T_VALUES,
         'M_VALUES':           args.M_VALUES,
         'TASK_DIVERGENCES':   args.TASK_DIVERGENCES,

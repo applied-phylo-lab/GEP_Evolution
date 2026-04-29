@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-fig_tradeoff_modularity_plane.py
-================================
+figS_tradeoff_modularity.py
+===========================
 
 Post hoc plotting of a Tikhonov-style tradeoff-modularity plane from
 cached snapshot genomes only. No simulation reruns.
@@ -13,9 +13,9 @@ Figure layout
 - rows: m = 1 and m = T
 - columns: one per T/K
 - within each subplot:
-    - faint gray trajectories for all replicates of each dT condition
+    - faint viridis trajectories for all replicates of each dT condition
     - one colored mean trajectory per dT
-    - colors follow the same gray-black dT gradient used elsewhere
+    - colors follow the same viridis_r dT colormap used elsewhere
 
 Per snapshot metric
 -------------------
@@ -87,6 +87,7 @@ class DataConfig:
     L: int = 100
     K: int = 4
     gamma: float = 1.0
+    fitness_r: float = 0.0
     density: float = 0.25
     T_values: List[int] = field(default_factory=lambda: [2, 3, 4, 6, 8])
     task_divs: List[float] = field(default_factory=lambda: [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4])
@@ -95,7 +96,6 @@ class DataConfig:
 @dataclass
 class FigureConfig:
     figsize_per_col: Tuple[float, float] = (4.2, 4.2)
-    faint_gray: Tuple[float, float, float] = (0.82, 0.82, 0.82)
     faint_alpha: float = 0.28
     faint_ms: float = 2.0
     mean_lw: float = 1.8
@@ -109,30 +109,18 @@ class FigureConfig:
 # 2. COLOR HELPERS
 # ============================================================
 
-def make_dt_gray_map(task_divs: List[float]) -> Dict[float, Tuple[float, float, float]]:
+def make_dt_viridis_map(task_divs: List[float]) -> Dict[float, Tuple]:
+    """Map each dT to viridis_r color, linearly spaced."""
     vals = sorted(task_divs)
+    cmap = mpl.colormaps["viridis_r"]
     if len(vals) == 1:
-        return {vals[0]: (0.0, 0.0, 0.0)}
-
-    gray_light = 0.72
-    gray_dark = 0.0
-
-    out = {}
-    for i, dT in enumerate(vals):
-        g = gray_light - (gray_light - gray_dark) * i / (len(vals) - 1)
-        g = max(g, 0.0)
-        out[dT] = (g, g, g)
-    return out
+        return {vals[0]: cmap(0.5)}
+    return {dT: cmap(i / (len(vals) - 1)) for i, dT in enumerate(vals)}
 
 
-def add_grayscale_colorbar(fig, task_divs: List[float]):
-    dt_min = min(task_divs)
-    dt_max = max(task_divs)
-    dt_norm = mpl.colors.Normalize(vmin=dt_min, vmax=dt_max)
-
-    cmap = mpl.colors.LinearSegmentedColormap.from_list(
-        "dt_gray", [(0.72, 0.72, 0.72), (0.0, 0.0, 0.0)]
-    )
+def add_viridis_colorbar(fig, task_divs: List[float]):
+    dt_norm = mpl.colors.Normalize(vmin=min(task_divs), vmax=max(task_divs))
+    cmap = mpl.colormaps["viridis_r"]
 
     cb_w = 0.45
     cb_x = 0.5 - cb_w / 2
@@ -153,8 +141,9 @@ def add_grayscale_colorbar(fig, task_divs: List[float]):
 # 3. CACHE LOADING
 # ============================================================
 
-def load_alpha_map(cache_dir: str, L: int, K: int, gamma: float, T: int) -> Dict[float, float]:
-    tpath = task_cache_path(cache_dir, L, K, gamma, T)
+def load_alpha_map(cache_dir: str, L: int, K: int, gamma: float,
+                   fitness_r: float, T: int) -> Dict[float, float]:
+    tpath = task_cache_path(cache_dir, L, K, gamma, fitness_r, T)
     with open(tpath + "_meta.json") as f:
         meta = json.load(f)
     return {float(k): v for k, v in meta["alpha_map"].items()}
@@ -165,13 +154,14 @@ def load_condition_if_exists(
     L: int,
     K: int,
     gamma: float,
+    fitness_r: float,
     density: float,
     T: int,
     dT: float,
     m: int,
     alpha: float,
 ):
-    sp = sim_cache_path(cache_dir, L, K, gamma, density, T, dT, m, alpha)
+    sp = sim_cache_path(cache_dir, L, K, gamma, fitness_r, density, T, dT, m, alpha)
     if not os.path.exists(sp + ".npz"):
         return None, None
     return load_condition(sp)
@@ -181,15 +171,17 @@ def load_condition_if_exists(
 # 4. PLANE CACHE HELPERS
 # ============================================================
 
-def _plane_param_root(plane_cache_dir: str, L: int, K: int, gamma: float) -> str:
-    folder = os.path.join(plane_cache_dir, f"L{L}_K{K}_gamma{gamma}")
+def _plane_param_root(plane_cache_dir: str, L: int, K: int, gamma: float,
+                      fitness_r: float) -> str:
+    folder = os.path.join(plane_cache_dir, f"L{L}_K{K}_gamma{gamma}_fr{fitness_r}")
     os.makedirs(folder, exist_ok=True)
     return folder
 
 
-def _plane_density_root(plane_cache_dir: str, L: int, K: int, gamma: float, density: float) -> str:
+def _plane_density_root(plane_cache_dir: str, L: int, K: int, gamma: float,
+                        fitness_r: float, density: float) -> str:
     folder = os.path.join(
-        _plane_param_root(plane_cache_dir, L, K, gamma),
+        _plane_param_root(plane_cache_dir, L, K, gamma, fitness_r),
         f"density{density:.4f}"
     )
     os.makedirs(folder, exist_ok=True)
@@ -201,6 +193,7 @@ def plane_cache_path(
     L: int,
     K: int,
     gamma: float,
+    fitness_r: float,
     density: float,
     T: int,
     dT: float,
@@ -208,7 +201,7 @@ def plane_cache_path(
     alpha: float,
 ) -> str:
     return os.path.join(
-        _plane_density_root(plane_cache_dir, L, K, gamma, density),
+        _plane_density_root(plane_cache_dir, L, K, gamma, fitness_r, density),
         f"plane_T{T}_dT{dT}_m{m}_alpha{alpha:.4f}"
     )
 
@@ -431,6 +424,7 @@ def get_or_compute_plane_trajectories(
         L=data_cfg.L,
         K=data_cfg.K,
         gamma=data_cfg.gamma,
+        fitness_r=data_cfg.fitness_r,
         density=data_cfg.density,
         T=T,
         dT=dT,
@@ -447,6 +441,7 @@ def get_or_compute_plane_trajectories(
         L=data_cfg.L,
         K=data_cfg.K,
         gamma=data_cfg.gamma,
+        fitness_r=data_cfg.fitness_r,
         density=data_cfg.density,
         T=T,
         dT=dT,
@@ -457,7 +452,8 @@ def get_or_compute_plane_trajectories(
         return None
 
     tasks = load_task_map(
-        task_cache_path(data_cfg.cache_dir, data_cfg.L, data_cfg.K, data_cfg.gamma, T)
+        task_cache_path(data_cfg.cache_dir, data_cfg.L, data_cfg.K,
+                        data_cfg.gamma, data_cfg.fitness_r, T)
     )[dT]
 
     trajs, snapshot_steps_per_rep = extract_condition_trajectories(
@@ -494,30 +490,62 @@ def get_or_compute_plane_trajectories(
 # 8. PLOTTING
 # ============================================================
 
-def draw_arrow_on_last_segment(ax, xs, ys, color, lw):
+def draw_arrow_on_last_segment(ax, xs, ys, color, lw, n_smooth: int = 4):
+    """
+    Draw an arrowhead at the end of the trajectory whose direction is
+    estimated from the mean of up to `n_smooth` trailing displacement
+    vectors. Carry-forward duplicates (zero displacement) are skipped so
+    that stalled trajectories in row 2 still get a visible arrow.
+    """
     if len(xs) < 2:
         return
 
+    # collect finite, non-zero trailing displacements
+    dx_list, dy_list = [], []
+    x1, y1 = None, None
     for i in range(len(xs) - 2, -1, -1):
         x0, y0 = xs[i], ys[i]
-        x1, y1 = xs[i + 1], ys[i + 1]
-        if np.isfinite([x0, y0, x1, y1]).all():
-            if (abs(x1 - x0) + abs(y1 - y0)) > 1e-12:
-                ax.annotate(
-                    "",
-                    xy=(x1, y1),
-                    xytext=(x0, y0),
-                    arrowprops=dict(
-                        arrowstyle="-|>",
-                        color=color,
-                        lw=lw,
-                        shrinkA=0.0,
-                        shrinkB=0.0,
-                        mutation_scale=10,
-                    ),
-                    zorder=5,
-                )
-                return
+        xi1, yi1 = xs[i + 1], ys[i + 1]
+        if not np.isfinite([x0, y0, xi1, yi1]).all():
+            continue
+        ddx, ddy = xi1 - x0, yi1 - y0
+        if abs(ddx) + abs(ddy) < 1e-12:
+            continue  # skip carry-forward duplicates
+        if x1 is None:
+            x1, y1 = xi1, yi1  # arrowhead tip = last finite moving point
+        dx_list.append(ddx)
+        dy_list.append(ddy)
+        if len(dx_list) >= n_smooth:
+            break
+
+    if x1 is None or len(dx_list) == 0:
+        return
+
+    # average direction over collected segments
+    dx = float(np.mean(dx_list))
+    dy = float(np.mean(dy_list))
+    norm = np.sqrt(dx ** 2 + dy ** 2)
+    if norm < 1e-12:
+        return
+
+    # phantom tail one step back along smoothed direction
+    x0_phantom = x1 - dx / norm * norm
+    y0_phantom = y1 - dy / norm * norm
+
+    ax.annotate(
+        "",
+        xy=(x1, y1),
+        xytext=(x0_phantom, y0_phantom),
+        arrowprops=dict(
+            arrowstyle="-|>",
+            color=color,
+            lw=lw * 0.8,
+            mutation_scale=6,
+            shrinkA=0.0,
+            shrinkB=0.0,
+        ),
+        zorder=5,
+    )
 
 
 def plot_panel(
@@ -530,7 +558,8 @@ def plot_panel(
     force_recompute: bool = False,
 ):
     alpha_map = load_alpha_map(
-        data_cfg.cache_dir, data_cfg.L, data_cfg.K, data_cfg.gamma, T
+        data_cfg.cache_dir, data_cfg.L, data_cfg.K, data_cfg.gamma,
+        data_cfg.fitness_r, T
     )
 
     for dT in data_cfg.task_divs:
@@ -550,7 +579,8 @@ def plot_panel(
         if trajs is None:
             continue
 
-        # faint gray: points only
+        # faint replicate points, tinted with dT color
+        color = dt_color_map[dT]
         for r in range(trajs.shape[0]):
             xs = trajs[r, :, 0]
             ys = trajs[r, :, 1]
@@ -560,7 +590,7 @@ def plot_panel(
 
             ax.scatter(
                 xs[good], ys[good],
-                color=fig_cfg.faint_gray,
+                color=color,
                 alpha=fig_cfg.faint_alpha,
                 s=fig_cfg.faint_ms ** 2,
                 linewidths=0,
@@ -574,20 +604,11 @@ def plot_panel(
         if np.sum(good) < 2:
             continue
 
-        color = dt_color_map[dT]
         ax.plot(
             mean_x[good], mean_y[good], "-",
             color=color,
             lw=fig_cfg.mean_lw,
             zorder=4,
-        )
-
-        draw_arrow_on_last_segment(
-            ax,
-            mean_x[good],
-            mean_y[good],
-            color=color,
-            lw=fig_cfg.arrow_lw,
         )
 
 
@@ -612,7 +633,7 @@ def make_figure(
         wspace=0.18, hspace=0.18,
     )
 
-    dt_color_map = make_dt_gray_map(data_cfg.task_divs)
+    dt_color_map = make_dt_viridis_map(data_cfg.task_divs)
     panel_labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     pi = 0
 
@@ -664,7 +685,7 @@ def make_figure(
             ax.set_xticks([0.0, 0.5, 1.0])
             ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
 
-    add_grayscale_colorbar(fig, data_cfg.task_divs)
+    add_viridis_colorbar(fig, data_cfg.task_divs)
 
     if save_path:
         fig.savefig(save_path, bbox_inches="tight")
@@ -684,12 +705,13 @@ def parse_args():
     p.add_argument("--cache_dir", type=str, default=defaults.cache_dir)
     p.add_argument("--plane_cache_dir", type=str, default=defaults.plane_cache_dir)
     p.add_argument("--save_dir", type=str, default="figures_out")
-    p.add_argument("--filename", type=str, default="fig_tradeoff_modularity_plane")
+    p.add_argument("--filename", type=str, default="figS_tradeoff_modularity")
     p.add_argument("--fmt", type=str, default="pdf")
 
     p.add_argument("--L", type=int, default=defaults.L)
     p.add_argument("--K", type=int, default=defaults.K)
     p.add_argument("--gamma", type=float, default=defaults.gamma)
+    p.add_argument("--fitness_r", type=float, default=defaults.fitness_r)
     p.add_argument("--density", type=float, default=defaults.density)
 
     p.add_argument("--T", type=int, nargs="+", default=defaults.T_values, dest="T_values")
@@ -713,6 +735,7 @@ if __name__ == "__main__":
         L=args.L,
         K=args.K,
         gamma=args.gamma,
+        fitness_r=args.fitness_r,
         density=args.density,
         T_values=args.T_values,
         task_divs=args.task_divs,
@@ -725,7 +748,9 @@ if __name__ == "__main__":
 
     save_path = os.path.join(
         args.save_dir,
-        f"{args.filename}_density{data_cfg.density:.4f}.{args.fmt}"
+        f"{args.filename}"
+        f"_gamma{data_cfg.gamma}_fr{data_cfg.fitness_r}"
+        f"_density{data_cfg.density:.4f}.{args.fmt}"
     )
 
     fig = make_figure(
