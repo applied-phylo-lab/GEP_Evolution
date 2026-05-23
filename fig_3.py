@@ -55,7 +55,7 @@ class DataConfig:
     gamma: float = 1.0
     fitness_r: float = 0.0
     densities: List[float] = field(default_factory=lambda: [0.25])
-    T_values: List[int] = field(default_factory=lambda: [2, 3, 4, 6, 8])
+    T_values: List[int] = field(default_factory=lambda: [4,6,8])
     task_divs: List[float] = field(default_factory=lambda: [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4])
     cutoff: Optional[int] = 200   # None = final state
 
@@ -207,7 +207,7 @@ def fig3_m_sweep(
     if n_cols == 1:
         axes = [axes]
 
-    fig.subplots_adjust(wspace=0.15, left=0.10, right=0.96, top=0.88, bottom=0.14)
+    fig.subplots_adjust(wspace=0.15, left=0.10, right=0.96, top=0.92, bottom=0.14)
 
     dt_color_map = make_dt_viridis_map(data_cfg.task_divs)
     target_dists = {
@@ -217,13 +217,10 @@ def fig3_m_sweep(
         for T in data_cfg.T_values
     }
 
-    cutoff_label = f"sub ≤ {data_cfg.cutoff}" if data_cfg.cutoff is not None else "final"
-
     for col, T in enumerate(data_cfg.T_values):
         ax = axes[col]
         ax.set_box_aspect(1)
-        ax.set_title(f"T/K = {T / data_cfg.K:.1f}  ({cutoff_label})",
-                     fontsize=12, pad=6)
+        ax.set_title(f"Number of tasks = {T}", fontsize=16, pad=8)
 
         all_ms = set()
 
@@ -258,12 +255,13 @@ def fig3_m_sweep(
             )
 
         ax.axhline(fig_cfg.reference_line_y, color="gray", ls="--", lw=0.8, alpha=0.5)
-        ax.set_xlabel("m (tasks jointly evaluated)")
+        ax.set_xlabel("Number of tasks under selection", fontsize=14)
         ax.set_ylim(0, None)
         if all_ms:
             ax.set_xticks(sorted(all_ms))
         if col == 0:
-            ax.set_ylabel(r"Mean pairwise $\bar{\Delta Z} / \bar{\Delta T}$")
+            ax.set_ylabel(r"Phenotype divergence  $\bar{\Delta Z} / \bar{\Delta T}$",
+                          fontsize=14)
         else:
             ax.tick_params(labelleft=False)
 
