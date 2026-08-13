@@ -1,0 +1,230 @@
+{
+  "started_utc": "2026-08-13T09:03:46.100190+00:00",
+  "environment": {
+    "host": "MacBook-Pro-43.local",
+    "python": "3.12.11",
+    "numpy": "2.3.5",
+    "platform": "macOS-26.2-arm64-arm-64bit",
+    "git": "b7c23c3850bb8d17c7b5a3f0acf8a01ff8308565-dirty",
+    "schema_version": 2,
+    "cpu_count": 10,
+    "blas_threads": {
+      "OMP_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+    }
+  },
+  "specs": {
+    "baseline": {
+      "cfg": {
+        "L": 100,
+        "K": 4,
+        "GAMMA": 1.0,
+        "FITNESS_R": 0.0,
+        "T_VALUES": [
+          2,
+          4,
+          6,
+          8
+        ],
+        "M_VALUES": null,
+        "TASK_DIVERGENCES": [
+          0.2,
+          0.4,
+          0.6,
+          0.8,
+          1.0,
+          1.2,
+          1.4
+        ],
+        "GENOME_DENSITIES": [
+          0.25,
+          0.5
+        ],
+        "N_REPS": 200,
+        "N_POP": 10000,
+        "MU": 1e-07,
+        "N_SUBS": null,
+        "N_SUBS_EPOCHS": null,
+        "N_SUBS_FLOOR": 401,
+        "MAX_REDRAWS": 100,
+        "CHUNK_SIZE": 10,
+        "RECORD_MODULARITY": "snapshots",
+        "TASK_SEED": 270,
+        "CACHE_DIR": "simulation_cache",
+        "N_WORKERS": 10,
+        "N_GENOME_SNAPSHOTS": 10,
+        "TASK_SAMPLING": "random"
+      },
+      "plan": {
+        "work_items": 5600,
+        "conditions": 280,
+        "total_solves": 33008192000.0,
+        "longest_item_solves": 12896160.0,
+        "eta_seconds": 35813.9560187418,
+        "critical_path_seconds": 139.92360049610025
+      },
+      "status": "planned"
+    },
+    "fitness_r": {
+      "cfg": {
+        "L": 100,
+        "K": 4,
+        "GAMMA": 1.0,
+        "FITNESS_R": -2.0,
+        "T_VALUES": [
+          2,
+          4,
+          6,
+          8
+        ],
+        "M_VALUES": "endpoints",
+        "TASK_DIVERGENCES": [
+          0.2,
+          0.4,
+          0.6,
+          0.8,
+          1.0,
+          1.2,
+          1.4
+        ],
+        "GENOME_DENSITIES": [
+          0.25
+        ],
+        "N_REPS": 200,
+        "N_POP": 10000,
+        "MU": 1e-07,
+        "N_SUBS": null,
+        "N_SUBS_EPOCHS": null,
+        "N_SUBS_FLOOR": 401,
+        "MAX_REDRAWS": 100,
+        "CHUNK_SIZE": 10,
+        "RECORD_MODULARITY": "snapshots",
+        "TASK_SEED": 270,
+        "CACHE_DIR": "simulation_cache",
+        "N_WORKERS": 10,
+        "N_GENOME_SNAPSHOTS": 10,
+        "TASK_SAMPLING": "random"
+      },
+      "plan": {
+        "work_items": 1120,
+        "conditions": 56,
+        "total_solves": 5875072000.0,
+        "longest_item_solves": 12896160.0,
+        "eta_seconds": 6374.465169584006,
+        "critical_path_seconds": 139.92360049610025
+      },
+      "status": "planned"
+    },
+    "gamma": {
+      "cfg": {
+        "L": 100,
+        "K": 4,
+        "GAMMA": 4.0,
+        "FITNESS_R": 0.0,
+        "T_VALUES": [
+          2,
+          4,
+          6,
+          8
+        ],
+        "M_VALUES": "endpoints",
+        "TASK_DIVERGENCES": [
+          0.2,
+          0.4,
+          0.6,
+          0.8,
+          1.0,
+          1.2,
+          1.4
+        ],
+        "GENOME_DENSITIES": [
+          0.25
+        ],
+        "N_REPS": 200,
+        "N_POP": 10000,
+        "MU": 1e-07,
+        "N_SUBS": null,
+        "N_SUBS_EPOCHS": null,
+        "N_SUBS_FLOOR": 401,
+        "MAX_REDRAWS": 100,
+        "CHUNK_SIZE": 10,
+        "RECORD_MODULARITY": "snapshots",
+        "TASK_SEED": 270,
+        "CACHE_DIR": "simulation_cache",
+        "N_WORKERS": 10,
+        "N_GENOME_SNAPSHOTS": 10,
+        "TASK_SAMPLING": "random"
+      },
+      "plan": {
+        "work_items": 1120,
+        "conditions": 56,
+        "total_solves": 5875072000.0,
+        "longest_item_solves": 12896160.0,
+        "eta_seconds": 6374.465169584006,
+        "critical_path_seconds": 139.92360049610025
+      },
+      "status": "planned"
+    },
+    "programs": {
+      "cfg": {
+        "L": 100,
+        "K": 6,
+        "GAMMA": 1.0,
+        "FITNESS_R": 0.0,
+        "T_VALUES": [
+          2,
+          4,
+          6,
+          8
+        ],
+        "M_VALUES": "endpoints",
+        "TASK_DIVERGENCES": [
+          0.2,
+          0.4,
+          0.6,
+          0.8,
+          1.0,
+          1.2,
+          1.4
+        ],
+        "GENOME_DENSITIES": [
+          0.25
+        ],
+        "N_REPS": 200,
+        "N_POP": 10000,
+        "MU": 1e-07,
+        "N_SUBS": null,
+        "N_SUBS_EPOCHS": null,
+        "N_SUBS_FLOOR": 401,
+        "MAX_REDRAWS": 100,
+        "CHUNK_SIZE": 10,
+        "RECORD_MODULARITY": "snapshots",
+        "TASK_SEED": 270,
+        "CACHE_DIR": "simulation_cache",
+        "N_WORKERS": 10,
+        "N_GENOME_SNAPSHOTS": 10,
+        "TASK_SAMPLING": "random"
+      },
+      "plan": {
+        "work_items": 1120,
+        "conditions": 56,
+        "total_solves": 8798272000.0,
+        "longest_item_solves": 19328160.0,
+        "eta_seconds": 11409.98406573385,
+        "critical_path_seconds": 250.65603520777077
+      },
+      "status": "planned"
+    }
+  },
+  "solve_time_us": {
+    "4": 10.85002050967887,
+    "6": 12.96843751333654
+  },
+  "n_workers": 10,
+  "finished_utc": "2026-08-13T09:03:50.471318+00:00",
+  "wall_seconds": 4.4,
+  "total_solves": 53556608000.0,
+  "eta_seconds": 59972.87042364367,
+  "dry_run": true
+}
