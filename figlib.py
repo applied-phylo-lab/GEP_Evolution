@@ -71,7 +71,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import matplotlib as mpl
 import numpy as np
 
-from simulate import (SCHEMA_VERSION, load_condition, load_task_ensembles,
+from simulate import (load_condition, load_task_ensembles,
                       sim_cache_path, task_cache_path)
 
 
