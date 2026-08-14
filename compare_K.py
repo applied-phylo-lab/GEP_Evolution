@@ -3,28 +3,46 @@
 compare_K.py
 ============
 Differentiation and optimization against the task-to-program ratio T/K, with
-one line per program number.
-
-The argument that program number sets the limit under simultaneous selection
-requires comparing caches at matched T/K, not matched T. At K=4 the grid
-T = 2, 4, 6, 8 covers T/K = 0.5, 1, 1.5, 2; the same T values at K=6 cover only
-0.33 to 1.33, so a K=4 versus K=6 comparison at equal T conflates "more tasks
-than programs" with "more tasks". Plotting against T/K makes the mismatch
-visible and shows how much of the informative range each cache actually spans.
+one line style per program number.
 
   Rows     differentiation, optimization
   Columns  sequential (m=1), simultaneous (m=T)
-  x-axis   T/K, with the boundary at 1 marked
+  x-axis   T/K, with the boundary T=K marked at 1
   Lines    one per task divergence (colour), one style per K
 
-Under simultaneous selection the two K curves should coincide when plotted this
-way if program number is what sets the limit. Under sequential selection the
-decline should begin left of T/K = 1 for both.
+--------------------------------------------------------------------
+Why T/K
+--------------------------------------------------------------------
+The claim under test is that program number sets where differentiation begins
+to fail under simultaneous selection, and does not set it under sequential
+selection. That is a claim about the POSITION of the decline, so the axis has
+to be the one on which the position should be fixed: tasks per program.
+
+Comparing program numbers at equal T instead would confound having more tasks
+than programs with simply having more tasks, since T=8 is twice the boundary at
+K=4 but only 1.33 times it at K=6.
+
+The two curves are not expected to coincide numerically. L is held fixed while
+K varies, so a larger K means a larger genotype matrix and more mutational
+targets, and T task optima in L-dimensional space do not rescale geometrically
+with T. What should coincide is the shape: a decline that sets in around T/K=1
+under simultaneous selection for every K, and one that begins well left of it
+under sequential selection.
+
+Both program numbers must span the same range of T/K for the overlay to mean
+anything. At K=4 the grid T = 2, 4, 6, 8 gives 0.5, 1, 1.5, 2; matching that at
+K=6 requires T = 3, 6, 9, 12. `run_batch.py --specs programs --K 6 --T 3 6 9 12`
+generates the missing points.
+
+`--x_axis tasks` plots against T instead, with T=K marked separately for each
+program number. That view answers a different question -- what adding programs
+buys at a fixed task number -- which `print_interaction` reports numerically.
 
 Usage:
-  python3 compare_K.py --K 4 6
-  python3 compare_K.py --K 4 6 --dT 0.2 1.4 --cutoff 200
-  python3 compare_K.py --K 4 6 8 --no_plot
+  python3 compare_K.py --K 4 6 --T 2 3 4 6 8 9 12
+  python3 compare_K.py --K 4 6 --dT 0.2 0.8 1.4
+  python3 compare_K.py --K 4 6 --x_axis tasks
+  python3 compare_K.py --K 4 6 --no_plot
 """
 
 import argparse
@@ -63,8 +81,10 @@ def collect(K_values: List[int], T_by_K: Dict[int, List[int]], args,
     return out
 
 
-def series(entry, metric: str, dT: float, regime: str, cutoff: FL.Cutoff):
-    """(T/K, mean, sd) across the T values present for one K."""
+def series(entry, metric: str, dT: float, regime: str, cutoff: FL.Cutoff,
+           x_axis: str = 'tasks'):
+    """(x, mean, sd) across the T values present for one K, where x is either
+    the task number or the task-to-program ratio."""
     spec, data = entry['spec'], entry['data']
     xs, ys, sds = [], [], []
     for T in spec.T_values:
@@ -76,15 +96,72 @@ def series(entry, metric: str, dT: float, regime: str, cutoff: FL.Cutoff):
         _, vals = FL.metric_values(by_m[m], metric, cutoff)
         mu, sd = FL.mean_sd(vals)
         if np.isfinite(mu):
-            xs.append(T / spec.K); ys.append(mu); sds.append(sd)
+            xs.append(T / spec.K if x_axis == 'ratio' else T)
+            ys.append(mu)
+            sds.append(sd)
     return np.array(xs), np.array(ys), np.array(sds)
+
+
+def print_interaction(caches, cutoff, task_divs):
+    """Effect of adding programs, at each task number and in each regime.
+
+    This is the quantity the figure exists to show. A gain that is flat in T
+    under sequential selection but grows with T under simultaneous selection is
+    the signature of program number limiting one regime and not the other.
+    """
+    Ks = sorted(caches)
+    if len(Ks) < 2:
+        return
+
+    print(f'\n{"=" * 96}')
+    print(f'EFFECT OF ADDING PROGRAMS  ({cutoff.label()})')
+    print('Difference in each metric between consecutive program numbers, at '
+          'matched task number.')
+    print('Flat in T under m=1 and growing in T under m=T is the expected '
+          'signature.')
+    print('=' * 96)
+    head = (f'{"K":>9} {"T":>3} {"dT":>5} '
+            f'{"d_diff_m1":>10} {"d_diff_mT":>10} '
+            f'{"d_opt_m1":>10} {"d_opt_mT":>10}')
+    print(head)
+    print('-' * len(head))
+
+    for lo, hi in zip(Ks[:-1], Ks[1:]):
+        shared = sorted(set(caches[lo]['spec'].T_values)
+                        & set(caches[hi]['spec'].T_values))
+        for T in shared:
+            for dT in task_divs:
+                cells = []
+                ok = True
+                for metric in ('differentiation', 'optimization'):
+                    for sel in ('min', 'T'):
+                        vals = []
+                        for K in (lo, hi):
+                            by_m = caches[K]['data'].get(T, {}).get(dT, {})
+                            m = FL.resolve_m(sel, by_m.keys(), T)
+                            if m is None:
+                                ok = False
+                                break
+                            _, v = FL.metric_values(by_m[m], metric, cutoff)
+                            vals.append(FL.mean_sd(v)[0])
+                        if not ok:
+                            break
+                        cells.append(vals[1] - vals[0])
+                    if not ok:
+                        break
+                if not ok or len(cells) < 4:
+                    continue
+                print(f'{f"{lo}->{hi}":>9} {T:>3} {dT:>5.1f} '
+                      f'{cells[0]:>+10.4f} {cells[1]:>+10.4f} '
+                      f'{cells[2]:>+10.4f} {cells[3]:>+10.4f}')
 
 
 def print_table(caches, cutoff, task_divs):
     print(f'\n{"=" * 92}')
-    print(f'DIFFERENTIATION AND OPTIMIZATION BY T/K  ({cutoff.label()})')
-    print('Rows are matched on T/K, so a K=4 row at T/K=2 (T=8) is comparable '
-          'to a K=6 row at T/K=2 (T=12).')
+    print(f'DIFFERENTIATION AND OPTIMIZATION BY PROGRAM AND TASK NUMBER '
+          f'({cutoff.label()})')
+    print('Rows at matched T/K are the comparable ones: K=4 at T=8 and K=6 at '
+          'T=12 are both two tasks per program.')
     print('=' * 92)
     head = (f'{"K":>3} {"T":>3} {"T/K":>5} {"dT":>5} '
             f'{"diff_m1":>16} {"diff_mT":>16} {"opt_m1":>16} {"opt_mT":>16}')
@@ -113,7 +190,7 @@ def print_table(caches, cutoff, task_divs):
                       f'{cells[2]:>16} {cells[3]:>16}')
 
 
-def make_figure(caches, task_divs, cutoff, save_path=None):
+def make_figure(caches, task_divs, cutoff, x_axis='ratio', save_path=None):
     FL.apply_style()
     fig, axes = plt.subplots(2, 2, figsize=(9.0, 8.0), squeeze=False)
     fig.subplots_adjust(hspace=0.30, wspace=0.22,
@@ -139,7 +216,8 @@ def make_figure(caches, task_divs, cutoff, save_path=None):
 
             for K in sorted(caches):
                 for dT in task_divs:
-                    xs, ys, sds = series(caches[K], metric, dT, regime, cutoff)
+                    xs, ys, sds = series(caches[K], metric, dT, regime,
+                                         cutoff, x_axis)
                     if xs.size == 0:
                         continue
                     ax.errorbar(xs, ys, yerr=sds, fmt='o', ls=styles[K],
@@ -147,15 +225,34 @@ def make_figure(caches, task_divs, cutoff, save_path=None):
                                 markerfacecolor='none', markeredgecolor=colors[dT],
                                 capsize=2, capthick=0.8, elinewidth=0.8)
 
-            ax.axvline(1.0, color='gray', ls=':', lw=1.0, alpha=0.8, zorder=0)
-            if r == 0:
-                ax.annotate('$T=K$', xy=(1.0, 1.0),
-                            xycoords=('data', 'axes fraction'),
-                            xytext=(3, -3), textcoords='offset points',
-                            fontsize=8, color='gray', ha='left', va='top')
+            # T = K, once per program number: to its left that K has at least
+            # as many programs as tasks.
+            marks = [1.0] if x_axis == 'ratio' else sorted(caches)
+            for K in marks:
+                ax.axvline(K, color='gray', ls=':', lw=1.0, alpha=0.8, zorder=0)
+                if r == 0:
+                    lab = '$T=K$' if x_axis == 'ratio' else f'$T=K={K}$'
+                    ax.annotate(lab, xy=(K, 1.0),
+                                xycoords=('data', 'axes fraction'),
+                                xytext=(3, -3), textcoords='offset points',
+                                fontsize=8, color='gray', ha='left', va='top')
             ax.axhline(1, color='gray', ls='--', lw=0.8, alpha=0.5)
             ax.set_ylim(0, 1.05)
-            ax.set_xlabel('Tasks per program, $T/K$')
+            ax.set_xlabel('Tasks per program, $T/K$' if x_axis == 'ratio'
+                          else 'Number of tasks')
+            if x_axis == 'ratio':
+                ratios = sorted({T / e['spec'].K for e in caches.values()
+                                 for T in e['spec'].T_values})
+                ticks = [r for r in (0.5, 1.0, 1.5, 2.0)
+                         if min(ratios) - 1e-9 <= r <= max(ratios) + 1e-9]
+                if ticks:
+                    ax.set_xticks(ticks)
+                    ax.set_xticklabels([f'{t:g}' for t in ticks])
+            else:
+                all_T = sorted({T for e in caches.values()
+                                for T in e['spec'].T_values})
+                ax.set_xticks(all_T)
+                ax.set_xticklabels([str(T) for T in all_T])
             if c == 0:
                 ax.set_ylabel(ylabel)
             else:
@@ -180,7 +277,7 @@ def parse_args():
     p.add_argument('--fmt', default='pdf')
     p.add_argument('--L', type=int, default=100)
     p.add_argument('--K', type=int, nargs='+', default=[4, 6], dest='K_values')
-    p.add_argument('--T', type=int, nargs='+', default=[2, 3, 4, 6, 8, 9, 12, 16],
+    p.add_argument('--T', type=int, nargs='+', default=[2, 3, 4, 6, 8, 9, 12],
                    dest='T_values',
                    help='Candidate T values; those without a cache are skipped.')
     p.add_argument('--dT', type=float, nargs='+', default=[0.2, 0.8, 1.4],
@@ -191,6 +288,10 @@ def parse_args():
     p.add_argument('--cutoff', type=int, default=200)
     p.add_argument('--cutoff_kind', default='substitutions',
                    choices=['substitutions', 'exposure'])
+    p.add_argument('--x_axis', default='ratio', choices=['ratio', 'tasks'],
+                   help="'ratio' plots against T/K with the boundary at 1 "
+                        "(default); 'tasks' plots against T with T=K marked "
+                        "per program number.")
     p.add_argument('--no_plot', action='store_true')
     p.add_argument('--no_show', action='store_true')
     return p.parse_args()
@@ -205,14 +306,17 @@ if __name__ == '__main__':
         raise SystemExit('No caches found.')
 
     print_table(caches, cutoff, args.task_divs)
+    print_interaction(caches, cutoff, args.task_divs)
 
     if not args.no_plot:
         os.makedirs(args.save_dir, exist_ok=True)
         path = os.path.join(
             args.save_dir,
-            f'{args.filename}_sub{args.cutoff}_gamma{args.gamma}'
-            f'_fr{args.fitness_r}_density{args.density:.4f}.{args.fmt}')
-        fig = make_figure(caches, args.task_divs, cutoff, save_path=path)
+            f'{args.filename}_{args.x_axis}_sub{args.cutoff}'
+            f'_gamma{args.gamma}_fr{args.fitness_r}'
+            f'_density{args.density:.4f}.{args.fmt}')
+        fig = make_figure(caches, args.task_divs, cutoff,
+                          x_axis=args.x_axis, save_path=path)
         if args.no_show:
             plt.close(fig)
         else:
