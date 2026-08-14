@@ -60,10 +60,30 @@ Configure through the environment, never in source:
 
 Notification failures are reported and never abort or fail the batch.
 
+Any spec can be redirected onto a different grid from the command line, which
+avoids editing this file for one-off runs. The spec still supplies everything
+not overridden, including its m grid:
+
+  python run_batch.py --specs programs --K 6 --T 3 6 9 12
+  python run_batch.py --specs programs --K 8 --T 4 8 12 16
+
+Those two share the `programs` spec's M_VALUES='endpoints', so they contrast
+sequential against simultaneous selection without the intermediate sweep. They
+are the T/K-matched program-number grids: at K=4 the default T = 2, 4, 6, 8
+spans T/K = 0.5 to 2, and matching that span at K=6 and K=8 requires T = 3, 6,
+9, 12 and T = 4, 8, 12, 16 respectively. Comparing program numbers at equal T
+instead would confound having more tasks than programs with simply having more
+tasks.
+
+Overrides land in the same cache root as any other run with the same
+(L, K, gamma, fitness_r), so grids that share T values reuse what is already
+cached rather than recomputing it.
+
 Usage:
   python run_batch.py --dry_run
   python run_batch.py
   python run_batch.py --specs baseline gamma
+  python run_batch.py --specs programs --K 6 --T 3 6 9 12 --workers 200
   python run_batch.py --n_reps 100 --workers 64
 """
 
@@ -430,6 +450,17 @@ def parse_args():
                    help='Plan and cost every spec without running anything.')
     p.add_argument('--n_reps', type=int, default=None)
     p.add_argument('--workers', type=int, default=None)
+    # Grid overrides. Each defaults to None so the spec's own value stands.
+    p.add_argument('--K', type=int, default=None,
+                   help='Override the number of programs.')
+    p.add_argument('--T', type=int, nargs='+', default=None,
+                   help='Override the task-count grid.')
+    p.add_argument('--dT', type=float, nargs='+', default=None,
+                   help='Override the task-divergence grid.')
+    p.add_argument('--density', type=float, nargs='+', default=None,
+                   help='Override the initial genotype densities.')
+    p.add_argument('--gamma', type=float, default=None)
+    p.add_argument('--fitness_r', type=float, default=None)
     p.add_argument('--chunk_size', type=int, default=None)
     p.add_argument('--cache_dir', type=str, default=None)
     p.add_argument('--manifest', type=str, default=None,
@@ -448,6 +479,12 @@ if __name__ == '__main__':
         'N_WORKERS': args.workers or default_workers(),
         'CHUNK_SIZE': args.chunk_size,
         'CACHE_DIR': args.cache_dir,
+        'K': args.K,
+        'T_VALUES': args.T,
+        'TASK_DIVERGENCES': args.dT,
+        'GENOME_DENSITIES': args.density,
+        'GAMMA': args.gamma,
+        'FITNESS_R': args.fitness_r,
     }
 
     manifest_path = args.manifest or (
