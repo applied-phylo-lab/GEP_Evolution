@@ -38,6 +38,27 @@ generates the missing points.
 program number. That view answers a different question -- what adding programs
 buys at a fixed task number -- which `print_interaction` reports numerically.
 
+--------------------------------------------------------------------
+Why the cutoff scales with K
+--------------------------------------------------------------------
+The genotype matrix has L*K entries, so a fixed substitution count is a
+different fraction of the available change at each program number: 200
+substitutions is half of L*K at K=4 but a quarter at K=8. Comparing program
+numbers at a fixed substitution count therefore has the same defect as
+comparing them at a fixed task number -- it holds the wrong quantity constant.
+
+The default `--cutoff_scale genome` scales the cutoff with K, so that every
+program number is evaluated after the same number of substitutions per genotype
+entry: with a base of 200 at the smallest K in the comparison, K = 4, 6, 8 are
+read at 200, 300 and 400 substitutions. `--cutoff_scale fixed` applies one
+cutoff to every K.
+
+In practice this matters only for the sequential panels. Under simultaneous
+selection nearly every replicate reaches an absorbing state well before any of
+these cutoffs, so those panels are effectively cutoff-independent; under
+sequential selection the trajectories are still climbing and the choice is
+material.
+
 Usage:
   python3 compare_K.py --K 4 6 --T 2 3 4 6 8 9 12
   python3 compare_K.py --K 4 6 --dT 0.2 0.8 1.4
@@ -81,6 +102,17 @@ def collect(K_values: List[int], T_by_K: Dict[int, List[int]], args,
     return out
 
 
+def cutoffs_by_K(K_values, base: int, kind: str, scale: str) -> Dict[int, FL.Cutoff]:
+    """One cutoff per program number. Under 'genome' scaling the cutoff grows
+    in proportion to K, so each program number is read after the same number of
+    substitutions per genotype entry; see the module docstring."""
+    Ks = sorted(K_values)
+    if scale == 'fixed' or kind == 'exposure' or not Ks:
+        return {K: FL.Cutoff(kind, base) for K in Ks}
+    ref = Ks[0]
+    return {K: FL.Cutoff(kind, int(round(base * K / ref))) for K in Ks}
+
+
 def series(entry, metric: str, dT: float, regime: str, cutoff: FL.Cutoff,
            x_axis: str = 'tasks'):
     """(x, mean, sd) across the T values present for one K, where x is either
@@ -102,7 +134,7 @@ def series(entry, metric: str, dT: float, regime: str, cutoff: FL.Cutoff,
     return np.array(xs), np.array(ys), np.array(sds)
 
 
-def print_interaction(caches, cutoff, task_divs):
+def print_interaction(caches, cutoffs, task_divs):
     """Effect of adding programs, at each task number and in each regime.
 
     This is the quantity the figure exists to show. A gain that is flat in T
@@ -114,7 +146,7 @@ def print_interaction(caches, cutoff, task_divs):
         return
 
     print(f'\n{"=" * 96}')
-    print(f'EFFECT OF ADDING PROGRAMS  ({cutoff.label()})')
+    print('EFFECT OF ADDING PROGRAMS')
     print('Difference in each metric between consecutive program numbers, at '
           'matched task number.')
     print('Flat in T under m=1 and growing in T under m=T is the expected '
@@ -142,7 +174,8 @@ def print_interaction(caches, cutoff, task_divs):
                             if m is None:
                                 ok = False
                                 break
-                            _, v = FL.metric_values(by_m[m], metric, cutoff)
+                            _, v = FL.metric_values(by_m[m], metric,
+                                                    cutoffs[K])
                             vals.append(FL.mean_sd(v)[0])
                         if not ok:
                             break
@@ -156,20 +189,21 @@ def print_interaction(caches, cutoff, task_divs):
                       f'{cells[2]:>+10.4f} {cells[3]:>+10.4f}')
 
 
-def print_table(caches, cutoff, task_divs):
-    print(f'\n{"=" * 92}')
-    print(f'DIFFERENTIATION AND OPTIMIZATION BY PROGRAM AND TASK NUMBER '
-          f'({cutoff.label()})')
+def print_table(caches, cutoffs, task_divs):
+    print(f'\n{"=" * 100}')
+    print('DIFFERENTIATION AND OPTIMIZATION BY PROGRAM AND TASK NUMBER')
     print('Rows at matched T/K are the comparable ones: K=4 at T=8 and K=6 at '
           'T=12 are both two tasks per program.')
-    print('=' * 92)
-    head = (f'{"K":>3} {"T":>3} {"T/K":>5} {"dT":>5} '
+    print('cutoff is per program number; see the module docstring.')
+    print('=' * 100)
+    head = (f'{"K":>3} {"T":>3} {"T/K":>5} {"dT":>5} {"cutoff":>7} '
             f'{"diff_m1":>16} {"diff_mT":>16} {"opt_m1":>16} {"opt_mT":>16}')
     print(head)
     print('-' * len(head))
 
     for K in sorted(caches):
         spec, data = caches[K]['spec'], caches[K]['data']
+        cutoff = cutoffs[K]
         for T in spec.T_values:
             for dT in task_divs:
                 by_m = data.get(T, {}).get(dT, {})
@@ -186,11 +220,12 @@ def print_table(caches, cutoff, task_divs):
                         mu, sd = FL.mean_sd(v)
                         cells.append(f'{mu:.4f}+/-{sd:.4f}')
                 print(f'{K:>3} {T:>3} {T / K:>5.2f} {dT:>5.1f} '
+                      f'{cutoff.value:>7} '
                       f'{cells[0]:>16} {cells[1]:>16} '
                       f'{cells[2]:>16} {cells[3]:>16}')
 
 
-def make_figure(caches, task_divs, cutoff, x_axis='ratio', save_path=None):
+def make_figure(caches, task_divs, cutoffs, x_axis='ratio', save_path=None):
     FL.apply_style()
     fig, axes = plt.subplots(2, 2, figsize=(9.0, 8.0), squeeze=False)
     fig.subplots_adjust(hspace=0.30, wspace=0.22,
@@ -217,7 +252,7 @@ def make_figure(caches, task_divs, cutoff, x_axis='ratio', save_path=None):
             for K in sorted(caches):
                 for dT in task_divs:
                     xs, ys, sds = series(caches[K], metric, dT, regime,
-                                         cutoff, x_axis)
+                                         cutoffs[K], x_axis)
                     if xs.size == 0:
                         continue
                     ax.errorbar(xs, ys, yerr=sds, fmt='o', ls=styles[K],
@@ -258,7 +293,10 @@ def make_figure(caches, task_divs, cutoff, x_axis='ratio', save_path=None):
             else:
                 ax.tick_params(labelleft=False)
 
-    handles = [plt.Line2D([], [], color='0.3', ls=styles[K], label=f'$K={K}$')
+    multi = len({c.value for c in cutoffs.values()}) > 1
+    handles = [plt.Line2D([], [], color='0.3', ls=styles[K],
+                          label=(f'$K={K}$, {cutoffs[K].value} subs' if multi
+                                 else f'$K={K}$'))
                for K in sorted(caches)]
     axes[0][1].legend(handles=handles, fontsize=9, frameon=False, loc='best')
 
@@ -285,7 +323,14 @@ def parse_args():
     p.add_argument('--gamma', type=float, default=1.0)
     p.add_argument('--fitness_r', type=float, default=0.0)
     p.add_argument('--density', type=float, default=0.25)
-    p.add_argument('--cutoff', type=int, default=200)
+    p.add_argument('--cutoff', type=int, default=200,
+                   help='Cutoff at the smallest program number; scaled per K '
+                        'unless --cutoff_scale fixed.')
+    p.add_argument('--cutoff_scale', default='genome',
+                   choices=['genome', 'fixed'],
+                   help="'genome' scales the cutoff with K so every program "
+                        "number is read after the same number of substitutions "
+                        "per genotype entry; 'fixed' uses one cutoff for all K.")
     p.add_argument('--cutoff_kind', default='substitutions',
                    choices=['substitutions', 'exposure'])
     p.add_argument('--x_axis', default='ratio', choices=['ratio', 'tasks'],
@@ -305,17 +350,22 @@ if __name__ == '__main__':
     if not caches:
         raise SystemExit('No caches found.')
 
-    print_table(caches, cutoff, args.task_divs)
-    print_interaction(caches, cutoff, args.task_divs)
+    cutoffs = cutoffs_by_K(caches.keys(), args.cutoff, args.cutoff_kind,
+                           args.cutoff_scale)
+    print('\nCutoff per program number: '
+          + ', '.join(f'K={K}: {c.label()}' for K, c in sorted(cutoffs.items())))
+
+    print_table(caches, cutoffs, args.task_divs)
+    print_interaction(caches, cutoffs, args.task_divs)
 
     if not args.no_plot:
         os.makedirs(args.save_dir, exist_ok=True)
         path = os.path.join(
             args.save_dir,
-            f'{args.filename}_{args.x_axis}_sub{args.cutoff}'
-            f'_gamma{args.gamma}_fr{args.fitness_r}'
+            f'{args.filename}_{args.x_axis}_{args.cutoff_scale}'
+            f'{args.cutoff}_gamma{args.gamma}_fr{args.fitness_r}'
             f'_density{args.density:.4f}.{args.fmt}')
-        fig = make_figure(caches, args.task_divs, cutoff,
+        fig = make_figure(caches, args.task_divs, cutoffs,
                           x_axis=args.x_axis, save_path=path)
         if args.no_show:
             plt.close(fig)
