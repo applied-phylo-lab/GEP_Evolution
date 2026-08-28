@@ -27,6 +27,22 @@ Usage:
   python3 fig_two_cutoffs.py --density 0.5 --dT 0.2 0.8 1.4
 """
 
+# --- repo root on sys.path, so this script runs from any working directory ---
+import os as _os
+import sys as _sys
+
+_REPO_ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _REPO_ROOT not in _sys.path:
+    _sys.path.insert(0, _REPO_ROOT)
+
+
+def _repo_path(*parts):
+    """Path anchored at the repository root, independent of the caller's cwd."""
+    return _os.path.join(_REPO_ROOT, *parts)
+
+# ---------------------------------------------------------------------------
+
+
 import argparse
 import os
 from typing import List, Optional
@@ -154,8 +170,8 @@ def print_summary(data, spec: FL.CacheSpec, cutoffs):
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument('--cache_dir', default='simulation_cache')
-    p.add_argument('--save_dir', default='figures_out')
+    p.add_argument('--cache_dir', default=_repo_path('simulation_cache'))
+    p.add_argument('--save_dir', default=_repo_path('figures_out'))
     p.add_argument('--filename', default='FS_two_cutoffs')
     p.add_argument('--fmt', default='pdf')
     p.add_argument('--L', type=int, default=100)

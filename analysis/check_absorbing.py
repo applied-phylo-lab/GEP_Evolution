@@ -33,6 +33,22 @@ Usage:
   python3 check_absorbing.py --cache_dir simulation_cache
 """
 
+# --- repo root on sys.path, so this script runs from any working directory ---
+import os as _os
+import sys as _sys
+
+_REPO_ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _REPO_ROOT not in _sys.path:
+    _sys.path.insert(0, _REPO_ROOT)
+
+
+def _repo_path(*parts):
+    """Path anchored at the repository root, independent of the caller's cwd."""
+    return _os.path.join(_REPO_ROOT, *parts)
+
+# ---------------------------------------------------------------------------
+
+
 import argparse
 import glob
 import json
@@ -133,7 +149,7 @@ def report(cache_dir: str, regime: str, only_dT: Optional[float],
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument('--cache_dir', default='simulation_cache')
+    p.add_argument('--cache_dir', default=_repo_path('simulation_cache'))
     p.add_argument('--regime', default='simultaneous',
                    choices=['simultaneous', 'sequential', 'all'],
                    help="'simultaneous' is m=T, 'sequential' is m=1.")

@@ -35,6 +35,22 @@ Usage:
   python3 fig_termination.py --sets "K=4,rho=0.25" "K=6,rho=0.25"
 """
 
+# --- repo root on sys.path, so this script runs from any working directory ---
+import os as _os
+import sys as _sys
+
+_REPO_ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _REPO_ROOT not in _sys.path:
+    _sys.path.insert(0, _REPO_ROOT)
+
+
+def _repo_path(*parts):
+    """Path anchored at the repository root, independent of the caller's cwd."""
+    return _os.path.join(_REPO_ROOT, *parts)
+
+# ---------------------------------------------------------------------------
+
+
 import argparse
 import glob
 import json
@@ -249,8 +265,8 @@ def parse_set(text: str):
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument('--cache_dir', default='simulation_cache')
-    p.add_argument('--save_dir', default='figures_out')
+    p.add_argument('--cache_dir', default=_repo_path('simulation_cache'))
+    p.add_argument('--save_dir', default=_repo_path('figures_out'))
     p.add_argument('--filename', default='FS1_termination')
     p.add_argument('--fmt', default='pdf')
     p.add_argument('--gamma', type=float, default=1.0)

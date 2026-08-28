@@ -18,6 +18,22 @@ Runtimes are kept short by using small L, K and substitution budgets; the tests
 check invariants and equivalences, not scientific behaviour.
 """
 
+# --- repo root on sys.path, so this script runs from any working directory ---
+import os as _os
+import sys as _sys
+
+_REPO_ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _REPO_ROOT not in _sys.path:
+    _sys.path.insert(0, _REPO_ROOT)
+
+
+def _repo_path(*parts):
+    """Path anchored at the repository root, independent of the caller's cwd."""
+    return _os.path.join(_REPO_ROOT, *parts)
+
+# ---------------------------------------------------------------------------
+
+
 import itertools
 import sys
 
