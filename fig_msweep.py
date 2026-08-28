@@ -141,8 +141,10 @@ def make_figure(data, spec: FL.CacheSpec, cutoff: FL.Cutoff,
                         left=0.10, right=0.94, top=0.92, bottom=0.10)
 
     colors = FL.dt_colors(spec.task_divs)
-    rows = [('differentiation', r'$\Delta$ degree of differentiation'),
-            ('optimization', r'$\Delta$ degree of optimization')]
+    rows = [('differentiation',
+             'Gain in differentiation\nover sequential selection'),
+            ('optimization',
+             'Gain in optimization\nover sequential selection')]
 
     for col, T in enumerate(spec.T_values):
         for row, (metric, ylabel) in enumerate(rows):
@@ -254,7 +256,7 @@ def parse_args():
     p.add_argument('--gamma', type=float, default=1.0)
     p.add_argument('--fitness_r', type=float, default=0.0)
     p.add_argument('--density', type=float, default=0.25)
-    p.add_argument('--T', type=int, nargs='+', default=[2, 4, 8],
+    p.add_argument('--T', type=int, nargs='+', default=[2, 4, 6, 8],
                    dest='T_values')
     p.add_argument('--dT', type=float, nargs='+',
                    default=[0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4],
