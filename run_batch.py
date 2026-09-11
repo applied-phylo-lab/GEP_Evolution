@@ -2,89 +2,31 @@
 """
 run_batch.py
 ============
-Queues the full set of simulation runs behind the manuscript and its
-supplementary analyses.
+Queues the simulation runs behind the manuscript and its supplement.
 
 One `simulate.run_simulations` call covers a single (L, K, gamma, fitness_r)
-combination, because those four determine the cache root. Genome density is a
-subdirectory within that root, so densities sweep inside one call. The specs
-below therefore expand to four runs, not five.
+combination, since those four determine the cache root; genome density is a
+subdirectory inside it, so densities sweep within one call.
 
-  baseline    K=4, gamma=1, r=0, density 1/K, all m
-              -> main figures, and the matched-exposure, exposure-diagnostic
-                 and collateral-effect supplementary analyses, all of which are
-                 re-indexings of these trajectories rather than new simulations
-  density     K=4, gamma=1, r=0, density 0.5,  m in {1, T}
-  fitness_r   K=4, gamma=1, r=-2, density 1/K, m in {1, T}
-  gamma       K=4, gamma=4, r=0,  density 1/K, m in {1, T}
-  programs    K=6, gamma=1, r=0,  density 1/K, m in {1, T}
+  baseline    K=4, gamma=1, r=0,  density 0.25, all m      -> Figs 2-4, S1, S6
+  density     K=4, gamma=1, r=0,  density 0.5,  m in {1,T} -> S5
+  fitness_r   K=4, gamma=1, r=-2, density 0.25, m in {1,T} -> S2
+  gamma       K=4, gamma=4, r=0,  density 0.25, m in {1,T} -> S3
+  programs    K=6, gamma=1, r=0,  density 0.25, m in {1,T} -> S4
 
-`density` shares a cache root with `baseline` and differs only in the density
-subdirectory, so the two are separate calls purely to give them different m
-grids. Every robustness spec contrasts sequential against simultaneous
-selection and does not need the intermediate m sweep, which dominates cost at
-large T; running it anyway would roughly triple those specs.
+Density is held at 0.25 in every spec, including the program-number sweep, so
+that K varies without also changing the density of the genotype matrix.
 
-BLAS threading
---------------
-Each worker process is single-threaded work, but NumPy's BLAS will spawn its
-own threads inside every worker unless told not to, oversubscribing the node
-several-fold. The limits must be set before NumPy is imported, which this
-module does at the top. Setting them in the job script as well does no harm.
+Robustness specs contrast sequential against simultaneous selection only. The
+intermediate m sweep dominates cost at large T and none of them use it.
 
-Runtime estimate
-----------------
-`calibrate_solve_time` times a single mutant evaluation (genome copy, NNLS
-solve, residual, performance) on the machine actually running the batch, and
-the planner multiplies it by the work list. The estimate is an UPPER bound on
-wall time for two reasons that pull in opposite directions but do not cancel:
-
-  - replicates that reach an absorbing state stop early, often far short of
-    their budget, and this is common at m = T;
-  - failed epochs force full-repertoire enumeration and are not predictable
-    from the work list.
-
-The first dominates in practice, so realized wall time is usually well below
-the estimate. Treat it as a ceiling for planning, not a prediction.
-
-Notification
-------------
-Configure through the environment, never in source:
-
-    export SIM_NOTIFY_EMAIL=you@example.edu
-    export SMTP_HOST=smtp.example.edu     # omit to use a local sendmail/mail
-    export SMTP_PORT=587
-    export SMTP_USER=...                  # omit for unauthenticated relays
-    export SMTP_PASSWORD=...
-    export SMTP_FROM=...                  # defaults to SIM_NOTIFY_EMAIL
-
-Notification failures are reported and never abort or fail the batch.
-
-Any spec can be redirected onto a different grid from the command line, which
-avoids editing this file for one-off runs. The spec still supplies everything
-not overridden, including its m grid:
-
-  python run_batch.py --specs programs --K 6 --T 3 6 9 12
-  python run_batch.py --specs programs --K 8 --T 4 8 12 16
-
-Those two share the `programs` spec's M_VALUES='endpoints', so they contrast
-sequential against simultaneous selection without the intermediate sweep. They
-are the T/K-matched program-number grids: at K=4 the default T = 2, 4, 6, 8
-spans T/K = 0.5 to 2, and matching that span at K=6 and K=8 requires T = 3, 6,
-9, 12 and T = 4, 8, 12, 16 respectively. Comparing program numbers at equal T
-instead would confound having more tasks than programs with simply having more
-tasks.
-
-Overrides land in the same cache root as any other run with the same
-(L, K, gamma, fitness_r), so grids that share T values reuse what is already
-cached rather than recomputing it.
+The program-number sweep needs its task grid on the command line, matched on
+T/K = 0.5, 1, 1.5, 2. `make_data.py` records those invocations and is the
+preferred entry point, because SPECS alone does not reproduce them.
 
 Usage:
-  python run_batch.py --dry_run
-  python run_batch.py
-  python run_batch.py --specs baseline gamma
-  python run_batch.py --specs programs --K 6 --T 3 6 9 12 --workers 200
-  python run_batch.py --n_reps 100 --workers 64
+  python3 run_batch.py --dry_run
+  python3 run_batch.py --specs baseline
 """
 
 import os

@@ -2,68 +2,23 @@
 """
 compare_K.py
 ============
-Differentiation and optimization against the task-to-program ratio T/K, with
-one line style per program number.
+Figure S4: differentiation and optimization against the task-to-program ratio
+T/K, for several program numbers.
 
-  Rows     differentiation, optimization
-  Columns  sequential (m=1), simultaneous (m=T)
-  x-axis   T/K, with the boundary T=K marked at 1
-  Lines    one per task divergence (colour), one style per K
+Program number is the marker channel here, because linestyle is reserved for
+simultaneity, which this figure splits across columns instead.
 
---------------------------------------------------------------------
-Why T/K
---------------------------------------------------------------------
-The claim under test is that program number sets where differentiation begins
-to fail under simultaneous selection, and does not set it under sequential
-selection. That is a claim about the POSITION of the decline, so the axis has
-to be the one on which the position should be fixed: tasks per program.
+Task numbers are matched on the ratio T/K = 0.5, 1, 1.5, 2:
+  K = 4  ->  T = 2, 4, 6, 8
+  K = 6  ->  T = 3, 6, 9, 12
+  K = 8  ->  T = 4, 8, 12, 16
 
-Comparing program numbers at equal T instead would confound having more tasks
-than programs with simply having more tasks, since T=8 is twice the boundary at
-K=4 but only 1.33 times it at K=6.
-
-The two curves are not expected to coincide numerically. L is held fixed while
-K varies, so a larger K means a larger genotype matrix and more mutational
-targets, and T task optima in L-dimensional space do not rescale geometrically
-with T. What should coincide is the shape: a decline that sets in around T/K=1
-under simultaneous selection for every K, and one that begins well left of it
-under sequential selection.
-
-Both program numbers must span the same range of T/K for the overlay to mean
-anything. At K=4 the grid T = 2, 4, 6, 8 gives 0.5, 1, 1.5, 2; matching that at
-K=6 requires T = 3, 6, 9, 12. `run_batch.py --specs programs --K 6 --T 3 6 9 12`
-generates the missing points.
-
-`--x_axis tasks` plots against T instead, with T=K marked separately for each
-program number. That view answers a different question -- what adding programs
-buys at a fixed task number -- which `print_interaction` reports numerically.
-
---------------------------------------------------------------------
-Why the cutoff scales with K
---------------------------------------------------------------------
-The genotype matrix has L*K entries, so a fixed substitution count is a
-different fraction of the available change at each program number: 200
-substitutions is half of L*K at K=4 but a quarter at K=8. Comparing program
-numbers at a fixed substitution count therefore has the same defect as
-comparing them at a fixed task number -- it holds the wrong quantity constant.
-
-The default `--cutoff_scale genome` scales the cutoff with K, so that every
-program number is evaluated after the same number of substitutions per genotype
-entry: with a base of 200 at the smallest K in the comparison, K = 4, 6, 8 are
-read at 200, 300 and 400 substitutions. `--cutoff_scale fixed` applies one
-cutoff to every K.
-
-In practice this matters only for the sequential panels. Under simultaneous
-selection nearly every replicate reaches an absorbing state well before any of
-these cutoffs, so those panels are effectively cutoff-independent; under
-sequential selection the trajectories are still climbing and the choice is
-material.
+--cutoff_scale genome scales the cutoff with K, so every program number is read
+after the same number of substitutions per genotype entry; 'fixed' applies one
+cutoff to all of them.
 
 Usage:
-  python3 compare_K.py --K 4 6 --T 2 3 4 6 8 9 12
-  python3 compare_K.py --K 4 6 --dT 0.2 0.8 1.4
-  python3 compare_K.py --K 4 6 --x_axis tasks
-  python3 compare_K.py --K 4 6 --no_plot
+  python3 compare_K.py --K 4 6 8 --cutoff 400 --cutoff_scale fixed
 """
 
 # --- repo root on sys.path, so this script runs from any working directory ---
@@ -106,7 +61,7 @@ def collect(K_values: List[int], T_by_K: Dict[int, List[int]], args,
                             T_values=T_by_K.get(K, args.T_values),
                             task_divs=args.task_divs)
         print(f'Loading K={K} ...')
-        data = FL.load_grid(spec, verbose=False)
+        data = FL.load_grid(spec, m_values=lambda T: [1, T], verbose=False)
         found = {T: sorted(data.get(T, {}).get(spec.task_divs[0], {}))
                  for T in spec.T_values}
         found = {T: ms for T, ms in found.items() if ms}
@@ -248,8 +203,9 @@ def make_figure(caches, task_divs, cutoffs, x_axis='ratio', save_path=None):
                         left=0.12, right=0.88, top=0.90, bottom=0.14)
 
     colors = FL.dt_colors(task_divs)
-    styles = {K: LINESTYLES[i % len(LINESTYLES)]
-              for i, K in enumerate(sorted(caches))}
+    # Linestyle is reserved for simultaneity, which is split across columns
+    # here, so program number takes the marker channel instead.
+    markers = {K: FL.MARKER_FOR_K.get(K, 'o') for K in sorted(caches)}
     rows = [('differentiation', 'Degree of differentiation'),
             ('optimization', 'Degree of optimization')]
     cols = [('sequential', 'Sequential ($m=1$)'),
@@ -271,24 +227,16 @@ def make_figure(caches, task_divs, cutoffs, x_axis='ratio', save_path=None):
                                          cutoffs[K], x_axis)
                     if xs.size == 0:
                         continue
-                    ax.errorbar(xs, ys, yerr=sds, fmt='o', ls=styles[K],
-                                color=colors[dT], lw=0.75, ms=4,
-                                markerfacecolor='none', markeredgecolor=colors[dT],
-                                capsize=2, capthick=0.8, elinewidth=0.8)
+                    FL.band(ax, xs, ys, sds, color=colors[dT], ls=FL.LS_MT,
+                            alpha=0.10, marker=markers[K], ms=4.5)
 
-            # T = K, once per program number: to its left that K has at least
-            # as many programs as tasks.
-            marks = [1.0] if x_axis == 'ratio' else sorted(caches)
-            for K in marks:
-                ax.axvline(K, color='gray', ls=':', lw=1.0, alpha=0.8, zorder=0)
-                if r == 0:
-                    lab = '$T=K$' if x_axis == 'ratio' else f'$T=K={K}$'
-                    ax.annotate(lab, xy=(K, 1.0),
-                                xycoords=('data', 'axes fraction'),
-                                xytext=(3, -3), textcoords='offset points',
-                                fontsize=8, color='gray', ha='left', va='top')
-            ax.axhline(1, color='gray', ls='--', lw=0.8, alpha=0.5)
-            ax.set_ylim(0, 1.05)
+            # On the ratio axis T/K = 1 needs no annotation; on the task-number
+            # axis each K still needs its own mark.
+            if x_axis != 'ratio':
+                for K in sorted(caches):
+                    FL.mark_K_line(ax, K, label=f'$K = {K}$',
+                                   show_label=(r == 0 and c == 0))
+            FL.metric_axis(ax, metric, ylabel=False)
             ax.set_xlabel('Tasks per program, $T/K$' if x_axis == 'ratio'
                           else 'Number of tasks')
             if x_axis == 'ratio':
@@ -310,11 +258,14 @@ def make_figure(caches, task_divs, cutoffs, x_axis='ratio', save_path=None):
                 ax.tick_params(labelleft=False)
 
     multi = len({c.value for c in cutoffs.values()}) > 1
-    handles = [plt.Line2D([], [], color='0.3', ls=styles[K],
+    handles = [plt.Line2D([], [], color='0.35', ls='none',
+                          marker=markers[K], ms=5, markerfacecolor='none',
+                          markeredgecolor='0.35',
                           label=(f'$K={K}$, {cutoffs[K].value} subs' if multi
-                                 else f'$K={K}$'))
+                                 else f'$K = {K}$'))
                for K in sorted(caches)]
-    axes[0][1].legend(handles=handles, fontsize=9, frameon=False, loc='best')
+    axes[0][0].legend(handles=handles, fontsize=11, frameon=False,
+                      loc='upper right')
 
     FL.add_dt_colorbar(fig, task_divs)
     if save_path:

@@ -7,187 +7,53 @@ simultaneity of selection.
 
 A genome is a binary matrix G in {0,1}^(L x K) mapping L loci onto K programs.
 For each of T tasks it deploys the non-negative program combination that best
-approximates that task's optimum, and performance is a decreasing function of
-the residual. At every fixation event a subset of m tasks is drawn and
-contributes to fitness; m = 1 is sequential selection, m = T is simultaneous
-selection, and intermediate m interpolates.
+approximates that task's optimum, and performance decreases with the residual.
+Each selective epoch draws m of the T tasks and fitness is a power mean over
+them: m = 1 is sequential selection, m = T simultaneous, intermediate m
+interpolates.
 
-Global parameters (all tunable via CLI):
-  L, K               : loci and programs
-  GAMMA              : performance exponent, P = (1 - d)^gamma
-  FITNESS_R          : power-mean exponent over active tasks (0 = geometric)
-  T_VALUES           : task counts to sweep
-  M_VALUES           : simultaneity levels. None -> [1, ..., T] for each T;
-                       'endpoints' -> {1, T} only, for robustness specs that
-                       compare sequential against simultaneous selection and
-                       do not need the intermediate sweep; or an explicit list
-  TASK_DIVERGENCES   : target mean pairwise distances between task optima
-  GENOME_DENSITIES   : initial Bernoulli densities; None -> [1/K]
-  N_REPS             : replicates per condition
-  N_POP, MU          : population size and per-site mutation rate
-  TASK_SEED          : base seed for task ensemble generation
-  N_SUBS / rule      : substitution budget, see "Substitution budget" below
-  RECORD_MODULARITY  : when to record mutational modularity, see "Cost" below
+Population genetics is haploid throughout:
+p_fix(s) = (1 - e^-2s) / (1 - e^-2Ns), neutral limit 1/N, mutation supply N*mu.
+Kimura's diploid form is not used and would need a dominance coefficient the
+presence/absence genotype matrix cannot represent.
 
---------------------------------------------------------------------
-Ploidy
---------------------------------------------------------------------
-The model is HAPLOID throughout. Fixation probability uses
+Termination, per replicate in `termination_reason`:
+  'n_subs'      the substitution budget was exhausted
+  'absorbing'   no single-bit mutant is beneficial under ANY admissible active
+                subset, so the genotype cannot change again
+  'redraw_cap'  MAX_REDRAWS consecutive draws produced nothing; a numerical
+                safeguard, not a frozen state, and reported separately
 
-    p_fix(s) = (1 - e^(-2s)) / (1 - e^(-2Ns)),
+An empty beneficial set under the currently drawn subset is not termination when
+m < T: the drawn subset is one realization of a fluctuating environment, so the
+engine consumes the epoch, redraws and continues. Failed epochs still count
+toward each task's selective exposure.
 
-whose neutral limit is 1/N, and the substitution rate uses a mutation supply
-of N*mu per site. The three are mutually consistent. Kimura's result is more
-often quoted in its diploid form, with 4Ns in the denominator and a 1/(2N)
-neutral limit; that form is NOT used here and would also require a dominance
-coefficient, which the presence/absence genotype matrix cannot represent.
+Substitution budget: S(T, m) = max(floor, round(E*T/m) + 1), with E defaulting
+to L. This is E selective epochs per task in expectation, so conditions can be
+compared at matched exposure as well as at matched substitutions; the floor
+guarantees a common fixed-substitution cutoff at every (T, m).
 
---------------------------------------------------------------------
-Termination
---------------------------------------------------------------------
-A run ends for one of three reasons, recorded per replicate in
-`termination_reason`:
+Replicate i is one world: its own initial genome, seeded on (i, L, K, density),
+and its own task ensemble, seeded on (i, T, dT). Neither depends on m, so
+comparisons across m are paired.
 
-  'n_subs'      the substitution budget was exhausted.
+Trajectory arrays come in two lengths and must not be conflated. STATE arrays
+have n_subs_realized + 1 entries, where index k is the genotype after exactly k
+substitutions. EVENT arrays have one fewer, where index k describes the
+substitution carrying state k to state k+1. There is no forward-filling: a
+replicate that terminated early has genuinely shorter arrays.
 
-  'absorbing'   no single-bit mutant is beneficial under ANY admissible
-                active subset. This is a genuine local optimum of the whole
-                selective regime and the genotype cannot change again.
+Cache layout:
+  tasks_L{L}_v{V}/taskens_T{T}.npz                       per-replicate ensembles
+  L{L}_K{K}_gamma{G}_fr{R}_v{V}/density{D}/sim_T{T}_dT{dT}_m{m}_alpha{A}.npz
 
-  'redraw_cap'  a beneficial mutation exists for some subset, but MAX_REDRAWS
-                consecutive draws failed to produce one. Numerical safeguard;
-                replicates ending this way are not frozen states and should be
-                reported rather than pooled.
-
-An empty beneficial set under the currently drawn subset is NOT termination
-when m < T. The drawn subset is one realization of a fluctuating selective
-environment, and a genotype at a local optimum with respect to the tasks drawn
-this epoch will usually have beneficial mutations available under other draws.
-The engine therefore consumes the epoch, redraws, and continues, following the
-convention used for fluctuating-environment adaptive walks. At m = T there is
-only one admissible subset, so the redraw path is unreachable and the absorbing
-test reduces to the plain "no beneficial mutation" check.
-
-Failed epochs count toward each task's selective exposure: a task that was
-active but produced no substitution was still evaluated by selection.
-
---------------------------------------------------------------------
-Cost: lazy mutant enumeration
---------------------------------------------------------------------
-Selection evaluates fitness only on the active subset, so identifying
-beneficial mutations needs mutant performances on m tasks, not on all T.
-`_MutantPerformance` fills the (L*K, T) table one task column at a time and
-caches what it has computed, so a step normally costs L*K*m NNLS solves
-instead of L*K*T.
-
-The remaining columns are filled only when something needs them:
-
-  - a failed epoch, which triggers the all-subsets absorbing test;
-  - a step on the snapshot schedule, where mutational modularity is recorded.
-
-At T = 8, m = 1 this is close to an eightfold reduction in the dominant cost.
-Results are unaffected: which columns have been computed cannot change any
-value, only when it is computed. `test_simulate.py` asserts that a run with
-modularity recorded at every step, and hence full enumeration at every step,
-produces bit-identical trajectories.
-
-Mutational modularity is recorded on the snapshot schedule rather than at every
-step because it is the only quantity requiring the full task repertoire and is
-not used by the current figures. `record_modularity='all'` restores per-step
-recording at full cost; 'none' skips it entirely.
-
-Effective rank of the activation matrix is no longer recorded. The function
-`effective_rank` remains available for ad-hoc analysis of stored snapshots.
-
---------------------------------------------------------------------
-Substitution budget
---------------------------------------------------------------------
-After S substitutions each task has received, in expectation, E = S*m/T
-selective epochs. Matching E across conditions therefore requires
-
-    S(T, m) = E * T / m.
-
-`n_subs_rule` returns max(N_SUBS_FLOOR, round(E*T/m) + 1) with E = N_SUBS_EPOCHS
-(default L, one epoch per task per locus) and a floor that guarantees a common
-fixed-substitution cutoff at every (T, m). The budget is stored per condition in
-the metadata, and cached conditions shallower than the current request, or with
-fewer replicates, are re-run rather than skipped.
-
---------------------------------------------------------------------
-Replicate structure
---------------------------------------------------------------------
-Replicate i is an independent draw of an entire world: its own initial genome
-and its own task ensemble. Seeds are constructed so that
-
-  initial genome    depends on (i, L, K, density)      -- not T, dT, or m
-  task ensemble     depends on (i, T, dT)              -- not m
-  stochastic path   depends on (i, T, dT, m, density, alpha)
-
-Consequently replicate i is the same starting genome and the same task ensemble
-at every m, which makes comparisons across m paired, and the same starting
-genome at every T and dT. Dispersion across replicates reflects variation in the
-phenotype being measured across task worlds, not path noise within a single
-world.
-
-The Dirichlet concentration alpha is calibrated once per (T, dT) against the
-target mean pairwise divergence; the per-replicate ensembles are independent
-draws at that alpha, so their realized divergence scatters around the target.
-The realized value is stored per ensemble and is the correct normalizer for
-per-replicate differentiation measures.
-
---------------------------------------------------------------------
-Cache layout
---------------------------------------------------------------------
-  simulation_cache/
-    tasks_L{L}_v{SCHEMA_VERSION}/
-      taskens_T{T}.npz          per-replicate task ensembles, once per T
-      taskens_T{T}_meta.json    alpha per dT, realized divergence per ensemble
-    L{L}_K{K}_gamma{GAMMA}_fr{FITNESS_R}_v{SCHEMA_VERSION}/
-      density{DENSITY}/
-        sim_T{T}_dT{dT}_m{m}_alpha{ALPHA}.npz
-        sim_T{T}_dT{dT}_m{m}_alpha{ALPHA}_meta.json
-
-Task optima depend only on (L, T, dT) and the ensemble seed, so they sit
-outside the parameter root and are shared by every K, gamma and fitness_r.
-Keeping them inside would make each robustness run repeat the alpha
-calibration and store a byte-identical copy.
-
-The schema version is part of both directory names, so caches written by
-earlier versions are never silently mixed with current ones.
-
---------------------------------------------------------------------
-Trajectory schema
---------------------------------------------------------------------
-Arrays come in two lengths and must not be conflated.
-
-  STATE arrays, length n_states = n_subs_realized + 1. Index k is the genotype
-  after exactly k substitutions; index 0 is the initial genome.
-
-      pheno_dist, cum_time, modularity_entropy           (n_states,)
-      P, d, ep_counts                                    (n_states, T)
-
-  EVENT arrays, length n_states - 1. Index k describes the substitution that
-  carried state k to state k+1.
-
-      W, wait_time, s_max, n_ben, n_failed_epochs        (n_events,)
-      active_tasks                                       (n_events, m)
-
-`modularity_entropy` is NaN except on the snapshot schedule; see "Cost" above.
-
-Snapshots store the genome and the cumulative time only. Program usage and
-expressed phenotypes are exactly recoverable via `expand_snapshot`, so caching
-them would triple snapshot storage for no information.
-
-There is no forward-filling. A replicate that terminated early has genuinely
-shorter arrays, and because termination is now absorbing, clamping an index to
-the last state is correct rather than an approximation. Check
-`termination_reason` before doing so for 'redraw_cap' replicates.
+Task optima depend only on (L, T, dT), so they sit outside the parameter root
+and are shared across K, gamma and fitness_r.
 
 Usage:
   python simulate.py --dry_run
-  python simulate.py
   python simulate.py --T 2 4 8 --m 1 2 4 --n_reps 100
-  python simulate.py --record_modularity all      # full enumeration every step
 """
 
 import argparse
@@ -595,32 +461,6 @@ def beneficial_subset_exists(P_wt: np.ndarray, P_mut: np.ndarray,
 # 8. METRICS
 # ============================================================
 
-def effective_rank(a_list: List[np.ndarray]) -> float:
-    """Exponentiated Shannon entropy of the squared singular values of the
-    row-normalized activation matrix: 1.0 if every task recruits the same
-    program combination, min(T, K) if all are independent.
-
-    Not recorded during simulation; provided for ad-hoc analysis of stored
-    snapshots via `expand_snapshot`.
-    """
-    if len(a_list) < 2:
-        return 1.0
-    A = np.array(a_list)
-    norms = np.linalg.norm(A, axis=1, keepdims=True)
-    norms = np.where(norms < 1e-12, 1.0, norms)
-    try:
-        _, s, _ = np.linalg.svd(A / norms, full_matrices=False)
-    except np.linalg.LinAlgError:
-        return float('nan')
-    s_sq = s ** 2
-    total = s_sq.sum()
-    if total < 1e-12:
-        return 1.0
-    p = s_sq / total
-    p = p[p > 1e-12]
-    return float(np.exp(-np.sum(p * np.log(p))))
-
-
 def modularity_entropy(dF: np.ndarray) -> float:
     """Mutational modularity, 1 - mean(H) / log(T), over the distribution of
     each mutation's absolute effects across tasks. M = 1 when every mutation is
@@ -943,9 +783,17 @@ def save_condition(base_path: str, results: List[Dict], params: Dict):
                   f, indent=2)
 
 
-def load_condition(base_path: str) -> Tuple[List[Dict], Dict]:
-    """Load a saved condition as (results, params), sorted by rep_index."""
-    arrays = dict(np.load(base_path + '.npz', allow_pickle=False))
+def load_condition(base_path: str,
+                   keep: Optional[Sequence[str]] = None
+                   ) -> Tuple[List[Dict], Dict]:
+    """Load a saved condition as (results, params), sorted by rep_index.
+
+    `keep` restricts which trajectory arrays are read. An npz member is only
+    decompressed when it is accessed, so naming the handful of arrays a figure
+    actually needs avoids inflating the rest. Passing None reads everything, as
+    before. Snapshots are read only when 'snapshots' is in `keep`.
+    """
+    npz = np.load(base_path + '.npz', allow_pickle=False)
     with open(base_path + '_meta.json') as f:
         meta = json.load(f)
 
@@ -954,15 +802,20 @@ def load_condition(base_path: str) -> Tuple[List[Dict], Dict]:
             f'{base_path}: schema version {meta.get("schema_version")} '
             f'!= {SCHEMA_VERSION}')
 
+    wanted = (STATE_KEYS + EVENT_KEYS if keep is None
+              else tuple(k for k in STATE_KEYS + EVENT_KEYS if k in keep))
+    want_snaps = keep is None or 'snapshots' in keep
+
     results = []
     for slot in range(meta['n_reps']):
         prefix = f'rep{slot}_'
         info = meta['rep_meta'][slot]
-        hist = {key: arrays[prefix + key] for key in STATE_KEYS + EVENT_KEYS}
-        snap_arrays = {k[len(prefix):]: v for k, v in arrays.items()
-                       if k.startswith(prefix + 'snap_')}
-        hist['snapshots'] = _unflatten_snapshots(snap_arrays,
-                                                 info['snapshot_steps'])
+        hist = {key: npz[prefix + key] for key in wanted}
+        if want_snaps:
+            snap_arrays = {k[len(prefix):]: npz[k] for k in npz.files
+                           if k.startswith(prefix + 'snap_')}
+            hist['snapshots'] = _unflatten_snapshots(snap_arrays,
+                                                     info['snapshot_steps'])
         hist.update({k: info[k] for k in
                      ('rep_index', 'n_states', 'n_subs_realized', 'n_tasks',
                       'termination_reason', 'n_failed_terminal',

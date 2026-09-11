@@ -2,44 +2,17 @@
 """
 fig_m_by_tasks.py
 =================
-Differentiation and optimization against task number, with one line per
-simultaneity level.
+Figure 4: differentiation and optimization against task number, one line per
+simultaneity level (m = 1, T/2, T) and one column per task divergence.
 
-  Rows     differentiation, optimization
-  Columns  one per task divergence
-  x-axis   number of tasks, with T=K marked
-  Lines    one per level of simultaneity, shaded from light grey at m=1 to
-           black at m=T
-
-This shows the sequential and simultaneous regimes together with the
-intermediate levels, in absolute values rather than as gains over sequential
-selection. The greyscale ordering makes the progression from sequential to
-simultaneous selection readable as a gradient rather than as a set of
-categories.
-
-Levels are specified as a FRACTION of the task repertoire rather than as a
-fixed count. A fixed value such as m=6 exists only where T>=6, so plotting
-fixed counts leaves most lines spanning only part of the axis. A fraction holds
-the degree of simultaneity constant instead of its absolute size: m=T/2 is 1
-task in 2, 2 in 4, 3 in 6 and 4 in 8.
-
-A fraction is plotted only at task numbers where it gives a whole number of
-tasks; it is never rounded, since a rounded point would be a different level of
-simultaneity from the one the line claims to show. With the default task
-numbers 2, 4, 6 and 8, the only fraction that is exact throughout is one half,
-which is why the default levels are the two limits and the midpoint. Quarters
-are exact at T=4 and T=8 and can be requested, but will be drawn only at those
-task numbers.
-
-'1' and 'T' denote the sequential and simultaneous limits and are exact at
-every task number. Fixed counts may also be given, in which case each line
-begins at the task number that first admits it.
+A fractional level is plotted only where it gives a whole number of tasks.
+Rounding would place a point at a different degree of simultaneity from the one
+the line represents, in a figure whose purpose is to hold that degree constant
+across task numbers.
 
 Usage:
-  python3 fig_m_by_tasks.py
+  python3 fig_m_by_tasks.py --plain_name
   python3 fig_m_by_tasks.py --m 1 1/4 1/2 3/4 T
-  python3 fig_m_by_tasks.py --m 1 2 4 T
-  python3 fig_m_by_tasks.py --cutoff 400 --filename F4_late
 """
 
 # --- repo root on sys.path, so this script runs from any working directory ---
@@ -82,10 +55,26 @@ def m_label(m_spec) -> str:
     return f'$m={m_spec}$'
 
 
-def m_style(m_spec) -> str:
-    """The two limits are solid; intermediate fractions are dashed, so the
-    sequential and simultaneous cases stand out from the interpolation."""
-    return '-' if (m_spec == 'T' or m_spec == 1) else '--'
+def m_style(m_spec):
+    """Linestyle is the simultaneity channel throughout the paper: dotted at
+    the sequential limit, dashed at intermediate m, solid at the simultaneous
+    limit. See the visual grammar in figlib."""
+    if m_spec == 'T':
+        return FL.LS_MT
+    if m_spec == 1:
+        return FL.LS_M1
+    return FL.LS_MHALF
+
+
+def level_int(m_spec, T: int) -> Optional[int]:
+    """The whole number of tasks this level denotes at this T, or None where
+    the fraction does not divide the repertoire."""
+    if m_spec == 'T':
+        return T
+    if isinstance(m_spec, Fraction):
+        product = m_spec * T
+        return int(product) if product.denominator == 1 else None
+    return int(m_spec)
 
 
 def resolve_level(m_spec, available, T: int):
@@ -106,14 +95,6 @@ def resolve_level(m_spec, available, T: int):
     return FL.resolve_m(m_spec, available, T)
 
 
-def m_colors(m_specs: Sequence) -> dict:
-    """Greyscale per simultaneity level, light at m=1 and black at the largest
-    value. Starts above the pale end so every line stays legible on white."""
-    cmap = mpl.colormaps['Greys']
-    n = max(len(m_specs) - 1, 1)
-    return {m: cmap(0.32 + 0.68 * i / n) for i, m in enumerate(m_specs)}
-
-
 def make_figure(data, spec: FL.CacheSpec, cutoff: FL.Cutoff,
                 m_specs: List, show_K_line: bool = True,
                 save_path: Optional[str] = None):
@@ -124,7 +105,9 @@ def make_figure(data, spec: FL.CacheSpec, cutoff: FL.Cutoff,
     fig.subplots_adjust(hspace=0.28, wspace=0.18,
                         left=0.10, right=0.97, top=0.90, bottom=0.12)
 
-    colors = m_colors(m_specs)
+    # Colour means task divergence here exactly as it does in Figures 2 and 3,
+    # even though each column already fixes it: the reader carries one key.
+    colors = FL.dt_colors(spec.task_divs)
     t_values = np.array(spec.T_values)
 
     for r, (metric, ylabel) in enumerate(METRICS):
@@ -151,11 +134,10 @@ def make_figure(data, spec: FL.CacheSpec, cutoff: FL.Cutoff,
                         xs.append(T); ys.append(mu); sds.append(sd)
                 if not xs:
                     continue
-                ax.errorbar(xs, ys, yerr=sds, fmt='', ls=m_style(m_spec),
-                            marker='o', color=colors[m_spec], lw=0.9, ms=4.0,
-                            markerfacecolor='none',
-                            markeredgecolor=colors[m_spec],
-                            capsize=2, capthick=0.8, elinewidth=0.8)
+                # Three same-coloured bands overlap in every panel, so the
+                # alpha is lower here than in the one-line-per-colour figures.
+                FL.band(ax, xs, ys, sds, color=colors[dT],
+                        ls=m_style(m_spec), alpha=0.10)
 
             ax.set_xticks(t_values)
             ax.set_xticklabels([str(int(v)) for v in t_values])
@@ -163,27 +145,21 @@ def make_figure(data, spec: FL.CacheSpec, cutoff: FL.Cutoff,
                 ax.set_xlabel('Number of tasks')
 
             if show_K_line and t_values.min() <= spec.K <= t_values.max():
-                ax.axvline(spec.K, color='gray', ls=':', lw=1.0, alpha=0.8,
-                           zorder=0)
-                if r == 0 and c == 0:
-                    ax.annotate(f'$T=K={spec.K}$', xy=(spec.K, 1.0),
-                                xycoords=('data', 'axes fraction'),
-                                xytext=(3, -3), textcoords='offset points',
-                                fontsize=8, color='gray', ha='left', va='top')
+                FL.mark_K_line(ax, spec.K, label=f'$K = {spec.K}$',
+                               show_label=(r == 0 and c == 0))
 
-            ax.axhline(1, color='gray', ls='--', lw=0.8, alpha=0.5)
-            ax.set_ylim(0, 1.05)
+            FL.metric_axis(ax, metric, ylabel=False)
             if c == 0:
                 ax.set_ylabel(ylabel)
             else:
                 ax.tick_params(labelleft=False)
 
-    handles = [plt.Line2D([], [], color=colors[m], ls=m_style(m), marker='o',
-                          markerfacecolor='none', label=m_label(m))
-               for m in m_specs]
-    axes[0][-1].legend(handles=handles, fontsize=8, frameon=False,
-                       loc='upper right', labelspacing=0.35,
-                       handlelength=1.8)
+    from matplotlib.lines import Line2D
+    handles = [Line2D([], [], color='0.35', ls=m_style(m), lw=1.7,
+                      label=m_label(m)) for m in m_specs]
+    # One key, in the first panel, next to the one K annotation.
+    axes[0][0].legend(handles=handles, fontsize=11, frameon=False,
+                      loc='upper right', labelspacing=0.35, handlelength=2.6)
 
     if save_path:
         fig.savefig(save_path, bbox_inches='tight')
@@ -238,6 +214,9 @@ def parse_args():
     p.add_argument('--save_dir', default=_repo_path('figures_out'))
     p.add_argument('--filename', default='F4')
     p.add_argument('--fmt', default='pdf')
+    p.add_argument('--plain_name', action='store_true',
+                   help='Write F4.pdf rather than F4_cut200_....pdf, i.e. the '
+                        'name the manuscript expects.')
     p.add_argument('--L', type=int, default=100)
     p.add_argument('--K', type=int, default=4)
     p.add_argument('--gamma', type=float, default=1.0)
@@ -256,7 +235,7 @@ def parse_args():
                         "and simultaneous limits; 'a/b' is a fraction of the "
                         'task repertoire, plotted only where it gives a whole '
                         'number of tasks; a bare integer is a fixed count.')
-    p.add_argument('--cutoff', type=int, default=200)
+    p.add_argument('--cutoff', type=int, default=400)
     p.add_argument('--cutoff_kind', default='substitutions',
                    choices=['substitutions', 'exposure'])
     p.add_argument('--no_K_line', action='store_true')
@@ -276,13 +255,15 @@ if __name__ == '__main__':
     cutoff = FL.Cutoff(args.cutoff_kind, args.cutoff)
 
     print(f'Loading {spec.label()} ...')
-    data = FL.load_grid(spec)
+    data = FL.load_grid(
+        spec, m_values=lambda T: [level_int(ms, T) for ms in m_specs])
 
     os.makedirs(args.save_dir, exist_ok=True)
-    path = os.path.join(
-        args.save_dir,
-        f'{args.filename}_cut{args.cutoff}_gamma{args.gamma}'
-        f'_fr{args.fitness_r}_K{args.K}_density{args.density:.4f}.{args.fmt}')
+    path = os.path.join(args.save_dir, f'{args.filename}.{args.fmt}') \
+        if args.plain_name else os.path.join(
+            args.save_dir,
+            f'{args.filename}_cut{args.cutoff}_gamma{args.gamma}'
+            f'_fr{args.fitness_r}_K{args.K}_density{args.density:.4f}.{args.fmt}')
 
     fig = make_figure(data, spec, cutoff, m_specs,
                       show_K_line=not args.no_K_line, save_path=path)

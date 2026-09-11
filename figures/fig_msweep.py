@@ -2,54 +2,19 @@
 """
 fig_msweep.py
 =============
-Gain over sequential selection as a function of simultaneity m, for both
-response metrics.
+Figure S6: gain over sequential selection, metric(m) - metric(m=1), against m.
 
-  Rows    differentiation and optimization
-  Columns one per task count T
-  x-axis  m, the number of task-specific phenotypes contributing jointly
-          to fitness at each fixation event
-  y-axis  gain(m) = metric(m) - metric(m=1)
-  Lines   one per task divergence, viridis_r
+Bands are the standard error of the within-replicate paired difference, not the
+spread across replicates. Replicate i shares its initial genome and task
+ensemble across every m, so the paired difference removes the between-world
+variance that dominates the error bands of Figure 4; the bands here are
+correspondingly much narrower, and answer a different question.
 
---------------------------------------------------------------------
-Pairing
---------------------------------------------------------------------
-Replicate i uses the same initial genome and the same task ensemble at every m
-(see simulate.py, "Replicate structure"). The contrast between m and m=1 is
-therefore PAIRED, and gain(m) is computed as the mean of within-replicate
-differences with the standard error of those differences,
+Colour is task divergence, on the scale shared with every other figure, so this
+figure carries no colour key of its own.
 
-    SE = s_d / sqrt(n),    d_i = X_i(m) - X_i(1),
-
-rather than as a difference of two independent means. Pairing removes the
-ensemble and initial-genome contributions from the error and requires no
-independence assumption between conditions.
-
-m=1 is the baseline by construction, so its gain and error are exactly zero.
-
---------------------------------------------------------------------
-Framing
---------------------------------------------------------------------
-gain(m) measures how much differentiation or optimization a lineage with
-historical simultaneity m has built up relative to purely sequential selection.
-It is anchored at zero at the most sequential case and grows with m, which is
-the orientation needed to ask whether intermediate m acts as a precursor to a
-transition to full simultaneity.
-
-The complementary quantity, the deficit relative to m=T, is obtained by setting
-baseline='T'; the two describe the same data anchored at opposite ends, since
-gain(m) + deficit(m) is constant for fixed T and dT.
-
-`fraction_of_gain` reports 100 * gain(m) / gain(T), the percentage of the fully
-simultaneous gain already present at intermediate m. It is undefined when
-gain(T) is not clearly positive, and is reported as nan rather than as a large
-or negative percentage in that case.
-
-Usage:
-  python3 fig_msweep.py
-  python3 fig_msweep.py --T 4 8 --cutoffs 200
-  python3 fig_msweep.py --cutoff_kind exposure --cutoffs 50
+One task number is loaded at a time. This is the only figure that needs every
+simultaneity level, and the whole grid does not fit in memory at once.
 """
 
 # --- repo root on sys.path, so this script runs from any working directory ---
@@ -145,8 +110,11 @@ def fraction_of_gain(ms: np.ndarray, gains: np.ndarray,
 # FIGURE
 # ============================================================
 
-def make_figure(data, spec: FL.CacheSpec, cutoff: FL.Cutoff,
+def make_figure(load_T, spec: FL.CacheSpec, cutoff: FL.Cutoff,
                 fig_cfg: FigConfig, save_path: Optional[str] = None):
+    """`load_T` is called once per task number and its result released before
+    the next. This figure is the only one that needs every simultaneity level,
+    and holding the whole grid at once does not fit in memory."""
     FL.apply_style()
     n_cols = len(spec.T_values)
     fig, axes = plt.subplots(
@@ -163,6 +131,7 @@ def make_figure(data, spec: FL.CacheSpec, cutoff: FL.Cutoff,
              'Gain in optimization\nover sequential selection')]
 
     for col, T in enumerate(spec.T_values):
+        data = load_T(T)
         for row, (metric, ylabel) in enumerate(rows):
             ax = axes[row][col]
             ax.set_box_aspect(1)
@@ -182,12 +151,11 @@ def make_figure(data, spec: FL.CacheSpec, cutoff: FL.Cutoff,
                 if ms.size == 0:
                     continue
                 seen_m.update(ms.tolist())
-                ax.errorbar(ms, gains, yerr=ses, fmt='-o', color=colors[dT],
-                            lw=fig_cfg.line_width, ms=fig_cfg.marker_size,
-                            markerfacecolor='none', markeredgecolor=colors[dT],
-                            capsize=2, capthick=1.0, elinewidth=1.0, zorder=3)
+                # Bands are +/- 1 SE of the within-replicate paired
+                # difference here, not the SD across replicates.
+                FL.band(ax, ms, gains, ses, color=colors[dT], ls=FL.LS_MT)
 
-            ax.axhline(0, color='gray', ls='--', lw=0.8, alpha=0.5)
+            ax.axhline(0, color='0.68', ls='-', lw=0.9, zorder=0)
             if seen_m:
                 ax.set_xticks(sorted(seen_m))
             if row == 1:
@@ -205,7 +173,6 @@ def make_figure(data, spec: FL.CacheSpec, cutoff: FL.Cutoff,
         for c in range(n_cols):
             axes[row][c].set_ylim(lo, hi)
 
-    FL.add_dt_colorbar(fig, spec.task_divs, orientation='vertical')
     if save_path:
         fig.savefig(save_path, bbox_inches='tight')
         print(f'Saved: {save_path}')
@@ -216,7 +183,7 @@ def make_figure(data, spec: FL.CacheSpec, cutoff: FL.Cutoff,
 # SUMMARY
 # ============================================================
 
-def print_summary(data, spec: FL.CacheSpec, cutoff: FL.Cutoff,
+def print_summary(load_T, spec: FL.CacheSpec, cutoff: FL.Cutoff,
                   fig_cfg: FigConfig):
     print(f'\n{"=" * 104}')
     print(f'SUMMARY  gain over m={fig_cfg.baseline}, paired  '
@@ -233,6 +200,7 @@ def print_summary(data, spec: FL.CacheSpec, cutoff: FL.Cutoff,
     print('-' * len(head))
 
     for T in spec.T_values:
+        data = load_T(T)
         for dT in spec.task_divs:
             by_m = data.get(T, {}).get(dT, {})
             if not by_m:
@@ -277,7 +245,7 @@ def parse_args():
     p.add_argument('--dT', type=float, nargs='+',
                    default=[0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4],
                    dest='task_divs')
-    p.add_argument('--cutoff', type=int, default=200)
+    p.add_argument('--cutoff', type=int, default=400)
     p.add_argument('--cutoff_kind', default='substitutions',
                    choices=['substitutions', 'exposure'])
     p.add_argument('--exposure_mode', default='realized',
@@ -298,7 +266,10 @@ if __name__ == '__main__':
     fig_cfg = FigConfig()
 
     print(f'Loading {spec.label()} ...')
-    data = FL.load_grid(spec)
+    from dataclasses import replace as _replace
+
+    def load_T(T):
+        return FL.load_grid(_replace(spec, T_values=[T]), verbose=False)
 
     os.makedirs(args.save_dir, exist_ok=True)
     tag = ('' if args.cutoff_kind == 'substitutions'
@@ -309,9 +280,9 @@ if __name__ == '__main__':
         f'_gamma{args.gamma}_fr{args.fitness_r}'
         f'_K{args.K}_density{args.density:.4f}.{args.fmt}')
 
-    fig = make_figure(data, spec, cutoff, fig_cfg, save_path=path)
+    fig = make_figure(load_T, spec, cutoff, fig_cfg, save_path=path)
     if not args.no_summary:
-        print_summary(data, spec, cutoff, fig_cfg)
+        print_summary(load_T, spec, cutoff, fig_cfg)
     if args.no_show:
         plt.close(fig)
     else:

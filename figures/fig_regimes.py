@@ -2,32 +2,19 @@
 """
 fig_regimes.py
 ==============
-Sequential against simultaneous selection at a single point along the
-trajectory, as one figure.
+Figures S2, S3 and S5: sequential against simultaneous selection at a single
+cutoff. Rows are the two metrics, columns the two regimes, lines one per task
+divergence.
 
-  Rows     differentiation, optimization
-  Columns  sequential (m=1), simultaneous (m=T)
-  x-axis   number of tasks, with T=K marked
-  Lines    one per task divergence, viridis_r
-
-This is the layout used by every supplementary robustness analysis, and it
-matches `compare_K.py` so that all supplementary figures share one visual
-grammar. The main-text figures instead devote their columns to the early and
-late phases, one figure per regime, because the change between phases is part
-of the main result; a robustness check only needs the endpoint.
-
-Each supplementary analysis is therefore one command producing one file, rather
-than a separate file per selection regime.
-
-Points are means across replicates and bars are +/- 1 SD. Each replicate is an
-independent draw of an initial genome and a task ensemble, so the SD describes
-variation in the plotted quantity across task worlds.
+This is the layout for every supplementary robustness analysis, so each is one
+command producing one file. The main-text figures instead spend their columns on
+the early and late phases, because the change between them is part of the
+result; a robustness check needs only the endpoint.
 
 Usage:
-  python3 fig_regimes.py --fitness_r -2.0 --filename FS1
-  python3 fig_regimes.py --gamma 4.0 --filename FS2
-  python3 fig_regimes.py --cutoff_kind exposure --cutoff 50 --filename FS3
-  python3 fig_regimes.py --density 0.5 --filename FS5
+  python3 fig_regimes.py --fitness_r -2.0     # S2
+  python3 fig_regimes.py --gamma 4.0          # S3
+  python3 fig_regimes.py --density 0.5        # S5
 """
 
 # --- repo root on sys.path, so this script runs from any working directory ---
@@ -96,26 +83,19 @@ def make_figure(data, spec: FL.CacheSpec, cutoff: FL.Cutoff,
                     if np.isfinite(mu):
                         xs.append(T); ys.append(mu); sds.append(sd)
                 if xs:
-                    ax.errorbar(xs, ys, yerr=sds, fmt='-o', color=colors[dT],
-                                lw=0.75, ms=5, markerfacecolor='none',
-                                markeredgecolor=colors[dT], capsize=2,
-                                capthick=1.0, elinewidth=1.0)
+                    # One m per panel, so every line is solid; see the visual
+                    # grammar in figlib.
+                    FL.band(ax, xs, ys, sds, color=colors[dT], ls=FL.LS_MT)
 
             ax.set_xticks(t_values)
             ax.set_xticklabels([str(int(v)) for v in t_values])
             ax.set_xlabel('Number of tasks')
 
             if show_K_line and t_values.min() <= spec.K <= t_values.max():
-                ax.axvline(spec.K, color='gray', ls=':', lw=1.0, alpha=0.8,
-                           zorder=0)
-                if r == 0:
-                    ax.annotate(f'$T=K={spec.K}$', xy=(spec.K, 1.0),
-                                xycoords=('data', 'axes fraction'),
-                                xytext=(3, -3), textcoords='offset points',
-                                fontsize=8, color='gray', ha='left', va='top')
+                FL.mark_K_line(ax, spec.K, label=f'$K = {spec.K}$',
+                               show_label=(r == 0 and c == 0))
 
-            ax.axhline(1, color='gray', ls='--', lw=0.8, alpha=0.5)
-            ax.set_ylim(0, 1.05)
+            FL.metric_axis(ax, metric, ylabel=False)
             if c == 0:
                 ax.set_ylabel(ylabel)
             else:
@@ -184,7 +164,7 @@ def parse_args():
     p.add_argument('--dT', type=float, nargs='+',
                    default=[0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4],
                    dest='task_divs')
-    p.add_argument('--cutoff', type=int, default=200,
+    p.add_argument('--cutoff', type=int, default=400,
                    help='Substitutions, or selective epochs per task when '
                         '--cutoff_kind is exposure.')
     p.add_argument('--cutoff_kind', default='substitutions',
@@ -207,7 +187,9 @@ if __name__ == '__main__':
     cutoff = FL.Cutoff(args.cutoff_kind, args.cutoff, args.exposure_mode)
 
     print(f'Loading {spec.label()} ...')
-    data = FL.load_grid(spec)
+    # Only the two limits are plotted; loading the intermediate levels was
+    # enough to exhaust memory at T = 8.
+    data = FL.load_grid(spec, m_values=lambda T: [1, T])
 
     os.makedirs(args.save_dir, exist_ok=True)
     tag = ('' if args.cutoff_kind == 'substitutions'

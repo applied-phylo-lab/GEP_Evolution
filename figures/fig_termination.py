@@ -2,37 +2,43 @@
 """
 fig_termination.py
 ==================
-When do simulations stop, and does the comparison point fall after that?
+Figure S1: where the comparison point falls along the trajectory.
 
-  Panel A  fraction of populations reaching an absorbing state, against task
-           number, separately for sequential and simultaneous selection
-  Panel B  substitutions required to reach that state under simultaneous
-           selection, against task divergence, one line per parameter set,
-           with the comparison point marked
+  A, B  the two plotted metrics against substitution number
+  C     fraction of single-bit mutants that are beneficial
+  D     substitutions to an absorbing state, one line per parameter set
 
-Panel A shows that the two selection regimes differ in whether adaptation ends
-at all. Under simultaneous selection the active set is the whole task
-repertoire, so a genotype with no beneficial mutation cannot change again.
-Under sequential selection the active set is redrawn each epoch, and a mutation
-that is not beneficial for the currently drawn task may be beneficial for
-another, so an endpoint in that sense does not generally exist.
+A-C are trajectories at one task number with the two regimes overlaid. Under
+simultaneous selection the active set is the whole repertoire, so a genotype
+with no beneficial mutation cannot change again: C decays to zero and the
+metrics stop moving. Under sequential selection the set is redrawn each epoch
+and an absorbing state generally does not exist; C settles at a non-zero level,
+meaning the genotype keeps turning over, while A and B level off anyway.
+Neither panel establishes that alone: flat metrics by themselves would suggest
+convergence to an optimum, which is not what happens.
 
-Panel B shows how long reaching that state takes, and therefore whether a
-comparison at a fixed number of substitutions falls before or after it. The
-requirement depends jointly on the genotype matrix and on how separated the
-task optima are: weakly separated optima are satisfied quickly under every
-parameter set, whereas strongly separated optima require substantially more
-substitutions when the genotype matrix is larger or denser. A comparison point
-adequate for one parameter set therefore need not be adequate for another, and
-the shortfall falls on the strongly separated conditions.
+The two regimes are not on a common scale in C. At m = 1 a mutant need only be
+beneficial for the one drawn task; at m = T for all of them jointly. The
+contrast to read is the shape, not the height.
 
-Both panels are read from the termination records stored with each replicate;
-nothing is re-simulated.
+Absorbing replicates are held at their last state, which is exact rather than an
+extrapolation. Replicates that stopped for any other reason are marked undefined
+beyond their last state rather than forward-filled, and a trajectory is cut off
+where fewer than MIN_COVERAGE of replicates remain defined.
+
+Bands in A-C are the standard error of the mean, not the spread across
+replicates shown in Figures 2-4. The question here is whether the mean
+trajectory has stopped moving, which is a statement about the mean; once every
+replicate is absorbing the spread across task worlds stops changing and would
+stay constant forever, which says nothing about convergence.
+
+D shows how long an absorbing state takes and therefore whether a fixed
+comparison point falls before or after it. Everything is read from cached
+trajectories and termination records; nothing is re-simulated.
 
 Usage:
   python3 fig_termination.py
-  python3 fig_termination.py --cutoff 200
-  python3 fig_termination.py --sets "K=4,rho=0.25" "K=6,rho=0.25"
+  python3 fig_termination.py --T_ref 4 --cutoff 400
 """
 
 # --- repo root on sys.path, so this script runs from any working directory ---
@@ -108,54 +114,107 @@ def scan(cache_dir: str, gamma: float, fitness_r: float) -> List[Dict]:
 
 
 def set_label(K: int, rho: float) -> str:
-    return f'$K={K}$, ' + (r'$\rho=1/K$' if abs(rho - 1.0 / K) < 1e-6
-                           else fr'$\rho={rho:g}$')
+    """Always the numeric density. The K sweep holds rho at 0.25 rather than at
+    1/K, so writing 1/K for K=4 would imply a rule the other sets do not
+    follow."""
+    return fr'$K={K}$, $\rho={rho:g}$' 
 
 
-def panel_A(ax, records, K_ref: int, rho_ref: float, task_divs):
-    """Fraction stopping, against task number, for the reference parameter set."""
-    colors = FL.dt_colors(task_divs)
-    styles = {'sequential': ':', 'simultaneous': '-'}
+TRAJ = {
+    'differentiation': 'Degree of differentiation',
+    'optimization': 'Degree of optimization',
+    'n_ben': 'Fraction of mutations\nthat are beneficial',
+}
 
-    for regime, marker in (('simultaneous', 'o'), ('sequential', 's')):
-        for dT in task_divs:
-            rows = [r for r in records
-                    if r['K'] == K_ref and abs(r['rho'] - rho_ref) < 1e-6
-                    and abs(r['dT'] - dT) < 1e-9
-                    and ((r['m'] == r['T']) if regime == 'simultaneous'
-                         else (r['m'] == 1))]
-            if not rows:
+
+MIN_COVERAGE = 0.9      # stop a trajectory once this fraction is not defined
+
+
+def trajectory(reps, kind: str, S: int, LK: int):
+    """(values, defined) matrices of one quantity against substitution number.
+
+    An absorbing replicate is held at its last state, which is exact rather
+    than an extrapolation: its genotype cannot change again, so that value IS
+    its value at every later step. For the beneficial fraction the held value
+    is zero, since absorbing means precisely that no beneficial mutation
+    exists.
+
+    A replicate that stopped for any other reason -- the substitution budget,
+    or the redraw safeguard -- has no defined value beyond its last state, and
+    is marked undefined there rather than forward-filled.
+    """
+    rows, defined = [], []
+    for rep in reps:
+        if kind == 'differentiation':
+            td = float(rep['task_dT_realized'])
+            if not (np.isfinite(td) and td > 0):
                 continue
-            rows.sort(key=lambda r: r['T'])
-            xs = [r['T'] for r in rows]
-            ys = [100.0 * r['n_absorbing'] / r['n'] for r in rows]
-            ax.plot(xs, ys, styles[regime], marker=marker, color=colors[dT],
-                    lw=0.9, ms=4, markerfacecolor='none',
-                    markeredgecolor=colors[dT])
+            v = np.asarray(rep['pheno_dist'], dtype=float) / td
+        elif kind == 'optimization':
+            d = np.asarray(rep['d'], dtype=float)
+            v = 1.0 - np.linalg.norm(d, axis=1) / np.sqrt(d.shape[1])
+        else:
+            v = np.asarray(rep['n_ben'], dtype=float) / float(LK)
+            if rep.get('termination_reason') == 'absorbing':
+                v = np.append(v, 0.0)
+        n = v.shape[0]
+        if n == 0:
+            continue
+        steps = np.arange(S + 1)
+        rows.append(v[np.minimum(steps, n - 1)])
+        defined.append(np.ones(S + 1, dtype=bool)
+                       if rep.get('termination_reason') == 'absorbing'
+                       else steps < n)
+    if not rows:
+        return np.empty((0, S + 1)), np.empty((0, S + 1), dtype=bool)
+    return np.vstack(rows), np.vstack(defined)
 
-    ax.set_xlabel('Number of tasks')
-    ax.set_ylabel('Populations reaching an\nabsorbing state (%)')
-    ax.set_ylim(-4, 104)
-    Ts = sorted({r['T'] for r in records
-                 if r['K'] == K_ref and abs(r['rho'] - rho_ref) < 1e-6})
-    ax.set_xticks(Ts)
-    ax.set_xticklabels([str(T) for T in Ts])
 
-    handles = [
-        plt.Line2D([], [], color='0.3', ls='-', marker='o',
-                   markerfacecolor='none', label='Simultaneous ($m=T$)'),
-        plt.Line2D([], [], color='0.3', ls=':', marker='s',
-                   markerfacecolor='none', label='Sequential ($m=1$)'),
-    ]
-    ax.legend(handles=handles, fontsize=8, frameon=False, loc='center right')
+def panel_traj(ax, data, kind: str, T_ref: int, traj_divs, S: int, LK: int,
+               cutoffs=(200,)):
+    """One metric against substitution number, sequential over simultaneous."""
+    colors = FL.dt_colors(traj_divs)
+    x = np.arange(S + 1)
+
+    for dT in traj_divs:
+        for m, ls in ((1, FL.LS_M1), (T_ref, FL.LS_MT)):
+            reps = FL.get(data, T_ref, dT, m)
+            if not reps:
+                continue
+            M, D = trajectory(reps, kind, S, LK)
+            if M.shape[0] == 0:
+                continue
+            Mn = np.where(D, M, np.nan)
+            n = D.sum(axis=0)
+            enough = n >= MIN_COVERAGE * D.shape[0]
+            with np.errstate(invalid='ignore'):
+                mu = np.nanmean(Mn, axis=0)
+                se = np.nanstd(Mn, axis=0, ddof=1) / np.sqrt(np.maximum(n, 1))
+            mu = np.where(enough, mu, np.nan)
+            FL.band(ax, x, mu, se, color=colors[dT], ls=ls, alpha=0.18)
+
+    for c in cutoffs:
+        if c <= S:
+            FL.mark_cutoff(ax, c)
+    ax.set_xlim(0, S)
+    ax.set_xlabel('Substitutions')
+    ax.set_ylabel(TRAJ[kind])
+    if kind in FL.METRIC_YLIM:
+        ax.set_ylim(*FL.METRIC_YLIM[kind])
+    else:
+        ax.set_ylim(bottom=0)
 
 
 def panel_B(ax, records, sets, cutoff: int, task_divs):
     """Median substitutions to absorption against task divergence, one line per
     parameter set, pooled over task number. The shaded band is the interquartile
     range across replicates."""
+    # Task divergence is already the x-axis, so colour is free -- and unused:
+    # the parameter sets are told apart by marker alone. Dispersion is drawn as
+    # a whisker on each marker rather than as a band, because four bands in one
+    # colour could not be attributed to their lines.
     markers = ['o', 's', '^', 'D', 'v']
-    cmap = plt.get_cmap('viridis')
+    dodge = 0.014
 
     for i, (K, rho) in enumerate(sets):
         xs, meds, los, his = [], [], [], []
@@ -172,40 +231,56 @@ def panel_B(ax, records, sets, cutoff: int, task_divs):
             his.append(np.percentile(vals, 75))
         if not xs:
             continue
-        color = cmap(0.08 + 0.78 * i / max(len(sets) - 1, 1))
-        ax.fill_between(xs, los, his, color=color, alpha=0.15, linewidth=0)
-        ax.plot(xs, meds, '-', marker=markers[i % len(markers)], color=color,
-                lw=1.1, ms=4.5, markerfacecolor='none', markeredgecolor=color,
-                label=set_label(K, rho))
+        off = (i - (len(sets) - 1) / 2.0) * dodge
+        xo = [x + off for x in xs]
+        ax.vlines(xo, los, his, color='black', lw=0.8, alpha=0.45, zorder=1)
+        ax.plot(xo, meds, '-', marker=markers[i % len(markers)], color='black',
+                lw=1.0, ms=5, markerfacecolor='none', markeredgecolor='black',
+                label=set_label(K, rho), zorder=2)
 
-    ax.axhline(cutoff, color='firebrick', ls='--', lw=1.0, zorder=0)
-    ax.annotate(f'{cutoff} substitutions', xy=(0.02, cutoff),
-                xycoords=('axes fraction', 'data'),
-                xytext=(0, 4), textcoords='offset points',
-                fontsize=8, color='firebrick', ha='left', va='bottom')
+    ax.set_ylim(top=max(ax.get_ylim()[1], cutoff * 1.15))
+    FL.mark_cutoff(ax, cutoff, f'{cutoff} substitutions', axis='y')
 
     ax.set_xlabel('Mean task divergence')
     ax.set_ylabel('Substitutions to absorbing state')
     ax.set_xticks(task_divs)
     ax.set_xticklabels([f'{v:g}' for v in task_divs])
-    ax.legend(fontsize=8, frameon=False, loc='upper left')
+    ax.legend(fontsize=9, frameon=False, loc='upper left')
 
 
-def make_figure(records, K_ref, rho_ref, sets, task_divs, cutoff,
-                save_path: Optional[str] = None):
+def make_figure(records, traj_data, sets, task_divs, traj_divs, T_ref, S, LK,
+                cutoff, save_path: Optional[str] = None):
     FL.apply_style()
-    fig, axes = plt.subplots(1, 2, figsize=(10.0, 4.2))
-    fig.subplots_adjust(wspace=0.30, left=0.09, right=0.97,
-                        top=0.90, bottom=0.16)
+    fig, axes = plt.subplots(2, 2, figsize=(10.0, 8.0))
+    fig.subplots_adjust(wspace=0.30, hspace=0.32, left=0.10, right=0.97,
+                        top=0.92, bottom=0.09)
+    flat = axes.ravel()
 
-    for i, ax in enumerate(axes):
-        ax.text(-0.14, 1.08, FL.panel_label(i), transform=ax.transAxes,
+    for i, ax in enumerate(flat):
+        ax.text(-0.16, 1.08, FL.panel_label(i), transform=ax.transAxes,
                 fontsize=14, fontweight='bold', va='top', ha='left')
 
-    panel_A(axes[0], records, K_ref, rho_ref, task_divs)
-    panel_B(axes[1], records, sets, cutoff, task_divs)
+    for ax, kind in zip(flat[:3],
+                        ('differentiation', 'optimization', 'n_ben')):
+        panel_traj(ax, traj_data, kind, T_ref, traj_divs, S, LK,
+                   cutoffs=(cutoff,))
+    # Both keys sit in the first panel; panel D has its own.
+    from matplotlib.lines import Line2D
+    cols = FL.dt_colors(traj_divs)
+    key_dT = flat[0].legend(
+        handles=[Line2D([], [], color=cols[d], lw=1.7,
+                        label=fr'$\overline{{\Delta T}} = {d:g}$')
+                 for d in traj_divs],
+        fontsize=9, frameon=False, loc='upper left')
+    flat[0].add_artist(key_dT)
+    flat[0].legend(handles=[Line2D([], [], color='0.35', lw=1.7, ls=ls,
+                                   label=lab)
+                            for ls, lab in ((FL.LS_M1, r'$m = 1$'),
+                                            (FL.LS_MT, fr'$m = T = {T_ref}$'))],
+                   fontsize=9, frameon=False, loc='upper right',
+                   handlelength=2.6)
 
-    FL.add_dt_colorbar(fig, task_divs, rect=[0.09, 0.005, 0.34, 0.020])
+    panel_B(flat[3], records, sets, cutoff, task_divs)
 
     if save_path:
         fig.savefig(save_path, bbox_inches='tight')
@@ -272,9 +347,19 @@ def parse_args():
     p.add_argument('--gamma', type=float, default=1.0)
     p.add_argument('--fitness_r', type=float, default=0.0)
     p.add_argument('--K_ref', type=int, default=4,
-                   help='Program number shown in panel A.')
+                   help='Program number shown in the trajectory panels.')
     p.add_argument('--rho_ref', type=float, default=0.25,
-                   help='Initial density shown in panel A.')
+                   help='Initial density shown in the trajectory panels.')
+    p.add_argument('--T_ref', type=int, default=8,
+                   help='Task number for the trajectory panels. The default is '
+                        'the largest in the baseline grid, where each phenotype '
+                        'is exposed least often under sequential selection and '
+                        'the comparison is hardest to defend.')
+    p.add_argument('--traj_dT', type=float, nargs='+', default=[0.2, 0.8, 1.4],
+                   help='Task divergences drawn in the trajectory panels.')
+    p.add_argument('--max_step', type=int, default=800,
+                   help='Right-hand limit of the trajectory panels.')
+    p.add_argument('--L', type=int, default=100)
     p.add_argument('--sets', nargs='+',
                    default=['K=4,rho=0.25', 'K=4,rho=0.5',
                             'K=6,rho=0.25', 'K=8,rho=0.25'],
@@ -282,7 +367,7 @@ def parse_args():
     p.add_argument('--dT', type=float, nargs='+',
                    default=[0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4],
                    dest='task_divs')
-    p.add_argument('--cutoff', type=int, default=200)
+    p.add_argument('--cutoff', type=int, default=400)
     p.add_argument('--no_show', action='store_true')
     p.add_argument('--no_summary', action='store_true')
     return p.parse_args()
@@ -298,10 +383,18 @@ if __name__ == '__main__':
         raise SystemExit('No conditions found.')
     print(f'  {len(records)} conditions')
 
+    spec = FL.CacheSpec(cache_dir=args.cache_dir, L=args.L, K=args.K_ref,
+                        gamma=args.gamma, fitness_r=args.fitness_r,
+                        density=args.rho_ref, T_values=[args.T_ref],
+                        task_divs=args.traj_dT)
+    print(f'Loading trajectories for T={args.T_ref} ...')
+    traj_data = FL.load_grid(spec, m_values=lambda T: [1, T], verbose=False)
+
     os.makedirs(args.save_dir, exist_ok=True)
     path = os.path.join(args.save_dir, f'{args.filename}.{args.fmt}')
-    fig = make_figure(records, args.K_ref, args.rho_ref, sets,
-                      args.task_divs, args.cutoff, save_path=path)
+    fig = make_figure(records, traj_data, sets, args.task_divs, args.traj_dT,
+                      args.T_ref, args.max_step, args.L * args.K_ref,
+                      args.cutoff, save_path=path)
 
     if not args.no_summary:
         print_summary(records, sets, args.cutoff)

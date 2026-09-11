@@ -1,0 +1,5 @@
+# Versions this code has been run against. Minor versions should be fine;
+# nothing here depends on recent API behaviour.
+numpy>=1.24,<3
+scipy>=1.10
+matplotlib>=3.7

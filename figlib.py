@@ -2,70 +2,35 @@
 """
 figlib.py
 =========
-Shared analysis layer for the figure scripts.
+Shared analysis and plotting layer for the figure scripts. Cutoffs, metrics and
+aggregation live here so that the figures cannot drift apart in how "after N
+substitutions" is resolved or how differentiation is normalized.
 
-Every figure resolves a cutoff, extracts a metric per replicate, and aggregates.
-Those three steps live here so that F2, F3, F4 and the supplementary figures
-cannot drift apart in how they define "after 200 substitutions" or how they
-normalize differentiation. Only depends on simulate.py.
+Indexing. State index k is the genotype after k substitutions, so a cutoff of C
+reads index C, not C-1. A replicate that terminated before C is read at its last
+state; that is exact for an 'absorbing' termination, and should be reported
+rather than pooled for a 'redraw_cap' one (see `termination_summary`).
 
---------------------------------------------------------------------
-Indexing
---------------------------------------------------------------------
-State arrays are indexed by realized substitutions: index k is the genotype
-after exactly k substitutions, index 0 the initial genome. A cutoff of C
-therefore reads index C, not C-1.
+Cutoff currencies. 'substitutions' compares conditions after the same amount of
+change in the shared genotype, and is the primary currency. 'exposure' compares
+after each task has contributed to fitness in E selective epochs, and is the
+control for the objection that low-m conditions simply received less direct
+selection per task.
 
-A replicate that terminated before C is read at its last state. Under the
-current engine that is exact rather than approximate: 'absorbing' means no
-mutation is beneficial under any admissible active subset, so the genotype
-cannot change again and the last state IS the state at every later cutoff.
-The one exception is 'redraw_cap', where the walk was cut short by the
-numerical safeguard rather than by reaching an optimum; those replicates are
-counted separately by `termination_summary` and should be reported, not
-silently pooled.
+Normalization. Differentiation is divided by each replicate's own realized task
+divergence, not by the nominal dT, whose scatter is widest at small T.
 
---------------------------------------------------------------------
-Two cutoff currencies
---------------------------------------------------------------------
-`Cutoff('substitutions', C)` compares conditions after the same number of
-realized substitutions. This holds constant the amount of evolutionary change
-in the shared genotype and is the primary currency for the main figures.
+Pairing. Replicate i shares its initial genome and task ensemble across every m,
+so `paired_difference` matches on rep_index and returns the mean and standard
+error of within-replicate differences.
 
-`Cutoff('exposure', E)` compares conditions after each task has contributed to
-fitness in E selective epochs. Because a substitution scores m of T tasks,
-matching E gives low-m conditions proportionally more substitutions. This is
-the supplementary control for the objection that high-T, low-m populations
-simply received less direct selection per task.
-
-Exposure has two modes. 'realized' walks the cached `ep_counts` and returns the
-first state at which the mean epoch count per task reaches E, so the matching is
-a property of the trajectory rather than of its expectation. 'expected' uses the
-closed form S = round(E*T/m) and is provided for comparison; the two agree
-closely because ep_counts is multinomial around its mean, but only 'realized'
-is exact.
-
---------------------------------------------------------------------
-Normalization
---------------------------------------------------------------------
-Each replicate has its own task ensemble, so differentiation is normalized by
-that replicate's own realized mean pairwise task divergence
-(`task_dT_realized`), not by a condition-level constant. The nominal dT is a
-label for the calibration target; realized values scatter around it, and the
-scatter is widest at small T where few pairs contribute to the mean.
-
---------------------------------------------------------------------
-Pairing
---------------------------------------------------------------------
-Replicate i uses the same initial genome and the same task ensemble at every m,
-so contrasts across m are paired. `paired_difference` matches on `rep_index`
-and returns the mean and standard error of the within-replicate differences,
-which is both tighter and free of the independence assumption that an unpaired
-difference-of-means would require.
+Visual grammar (section 8). Colour is task divergence; linestyle distinguishes
+series that share a panel; marker is program number, used only where K varies;
+dispersion is a shaded band. A channel is never used for two things at once, and
+a quantity already carried by an axis is not also carried by colour.
 """
 
 from dataclasses import dataclass, field
-from itertools import combinations
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import matplotlib as mpl
@@ -79,48 +44,80 @@ from simulate import (load_condition, load_task_ensembles,
 # 1. STYLE
 # ============================================================
 
+# Helvetica on a Mac, its metric clone elsewhere, so a figure rendered on
+# either machine is the same figure. Without this the text falls back to
+# Helvetica via the PDF base-14 set while the MATH falls back to DejaVu, and a
+# panel ends up mixing two typefaces in one label.
+_SANS_PREFERENCE = ('Helvetica', 'Nimbus Sans', 'Arial', 'Liberation Sans',
+                    'Arimo', 'DejaVu Sans')
+
+
+def sans_family() -> str:
+    """First available Helvetica-metric family on this machine."""
+    from matplotlib import font_manager
+    have = {f.name for f in font_manager.fontManager.ttflist}
+    for name in _SANS_PREFERENCE:
+        if name in have:
+            return name
+    return 'DejaVu Sans'
+
+
 def apply_style():
+    fam = sans_family()
     mpl.rcParams.update({
-        'pdf.use14corefonts': True,
+        'pdf.use14corefonts': False,   # embed, as most journals require
         'font.family': 'sans-serif',
-        'font.sans-serif': ['Helvetica'],
+        'font.sans-serif': [fam] + [f for f in _SANS_PREFERENCE if f != fam],
+        # math must resolve to the same face as the surrounding text
+        'mathtext.fontset': 'custom',
+        'mathtext.rm': fam,
+        'mathtext.it': f'{fam}:italic',
+        'mathtext.bf': f'{fam}:bold',
         'axes.spines.top': False,
         'axes.spines.right': False,
+        'axes.titleweight': 'bold',    # column titles; rows use the y label
+        'axes.grid': False,            # pinned: this paper uses a plain ground
         'font.size': 11,
     })
 
 
+# Colour is keyed to the VALUE of dT over the full sweep, not to its rank in
+# whatever subset a figure happens to plot. Figure 4 shows three divergences
+# and Figure 2 shows seven; keying by rank would give dT = 0.8 a different
+# colour in each. The pale end of viridis is trimmed because pure #FDE725 is
+# not legible as a thin line on white.
+DT_VMIN, DT_VMAX = 0.2, 1.4
+DT_CMAP_FLOOR = 0.0
+
+DT_CMAP = mpl.colors.LinearSegmentedColormap.from_list(
+    'viridis_r_trim',
+    mpl.colormaps['viridis_r'](np.linspace(DT_CMAP_FLOOR, 1.0, 256)))
+
+
+def dt_position(dT: float) -> float:
+    """Where a divergence sits on the shared colour scale, clipped so that a
+    value outside the standard sweep still renders."""
+    span = DT_VMAX - DT_VMIN
+    return float(np.clip((float(dT) - DT_VMIN) / span, 0.0, 1.0)) if span else 0.5
+
+
 def dt_colors(task_divs: Sequence[float]) -> Dict[float, tuple]:
-    """One colour per task divergence, dark at high divergence."""
-    vals = sorted(task_divs)
-    cmap = mpl.colormaps['viridis_r']
-    if len(vals) == 1:
-        return {vals[0]: cmap(0.5)}
-    return {dT: cmap(i / (len(vals) - 1)) for i, dT in enumerate(vals)}
-
-
-def T_colors(T_values: Sequence[int]) -> Dict[int, tuple]:
-    """One colour per task count. Stops short of the pale end of plasma so
-    every line stays legible on white."""
-    vals = sorted(T_values)
-    cmap = mpl.colormaps['plasma']
-    if len(vals) == 1:
-        return {vals[0]: cmap(0.4)}
-    return {T: cmap(0.08 + 0.72 * i / (len(vals) - 1))
-            for i, T in enumerate(vals)}
+    """One colour per task divergence, dark at high divergence. Identical for
+    a given dT in every figure in the paper."""
+    return {dT: DT_CMAP(dt_position(dT)) for dT in task_divs}
 
 
 def add_dt_colorbar(fig, task_divs: Sequence[float], orientation='horizontal',
                     rect=None):
-    norm = mpl.colors.Normalize(vmin=min(task_divs), vmax=max(task_divs))
-    cmap = mpl.colormaps['viridis_r']
+    norm = mpl.colors.Normalize(vmin=DT_VMIN, vmax=DT_VMAX)
+    cmap = DT_CMAP
     if rect is None:
         rect = ([0.27, 0.02, 0.50, 0.020] if orientation == 'horizontal'
                 else [0.97, 0.15, 0.015, 0.70])
     ax = fig.add_axes(rect)
     cb = mpl.colorbar.ColorbarBase(ax, cmap=cmap, norm=norm,
                                    orientation=orientation, ticks=task_divs)
-    cb.set_ticklabels([f'{dT:g}' for dT in task_divs])
+    cb.set_ticklabels([f'{dT:.1f}' for dT in task_divs])
     if orientation == 'horizontal':
         cb.set_label(r'$\overline{\Delta T}$', fontsize=10)
     else:
@@ -166,12 +163,57 @@ def load_alpha_maps(spec: CacheSpec) -> Dict[int, Dict[float, float]]:
     return out
 
 
-def load_grid(spec: CacheSpec, m_values: Optional[Sequence[int]] = None,
-              verbose: bool = True) -> Dict[int, Dict[float, Dict[int, List]]]:
+def wanted_m(m_values, T: int) -> List[int]:
+    """Which simultaneities to load for one task number.
+
+    None      every level, 1..T
+    'min'     the sequential limit only
+    'T'       the simultaneous limit only
+    callable  f(T) -> levels, for figures whose levels depend on T
+    sequence  explicit levels, dropping any above T
+
+    Loading levels a figure never draws is the dominant cost of every figure
+    script and, at T=8, enough to exhaust memory. Ask for what you plot.
+    """
+    if m_values is None:
+        return list(range(1, T + 1))
+    if callable(m_values):
+        return sorted({int(m) for m in m_values(T) if m and 1 <= int(m) <= T})
+    if isinstance(m_values, str):
+        if m_values == 'T':
+            return [T]
+        if m_values == 'min':
+            return [1]
+        raise ValueError(f'Unknown m_values selector: {m_values!r}')
+    return [int(m) for m in m_values if int(m) <= T]
+
+
+# Arrays that no metric or figure in this paper reads. Dropping them as each
+# condition is loaded roughly halves peak memory, which is what decides whether
+# a whole-grid figure runs at all on a 4 GB machine.
+SLIM_DROP = ('P', 'W', 'wait_time', 's_max', 'n_failed_epochs',
+             'modularity_entropy', 'cum_time', 'snapshots')
+
+# The complement: everything the metrics, cutoffs and diagnostics in this
+# module actually read. Passed to `load_condition` so the rest is never
+# decompressed in the first place.
+SLIM_KEEP = ('pheno_dist', 'd', 'ep_counts', 'active_tasks', 'n_ben')
+
+
+def slim_reps(reps: List[Dict], drop: Sequence[str] = SLIM_DROP) -> List[Dict]:
+    for rep in reps:
+        for key in drop:
+            rep.pop(key, None)
+    return reps
+
+
+def load_grid(spec: CacheSpec, m_values=None, verbose: bool = True,
+              slim: bool = True) -> Dict[int, Dict[float, Dict[int, List]]]:
     """{T: {dT: {m: replicates}}} for everything present in the cache.
 
     Missing conditions are skipped with a warning rather than raising, so a
-    partially complete batch still plots what it has.
+    partially complete batch still plots what it has. See `wanted_m` for the
+    selector forms accepted by `m_values`.
     """
     alpha_maps = load_alpha_maps(spec)
     data: Dict[int, Dict[float, Dict[int, List]]] = {}
@@ -180,8 +222,7 @@ def load_grid(spec: CacheSpec, m_values: Optional[Sequence[int]] = None,
         if T not in alpha_maps:
             continue
         data[T] = {}
-        want_m = list(range(1, T + 1)) if m_values is None else \
-            [m for m in m_values if m <= T]
+        want_m = wanted_m(m_values, T)
 
         for dT in spec.task_divs:
             if dT not in alpha_maps[T]:
@@ -193,10 +234,11 @@ def load_grid(spec: CacheSpec, m_values: Optional[Sequence[int]] = None,
                                       spec.gamma, spec.fitness_r, spec.density,
                                       T, dT, m, alpha)
                 try:
-                    reps, _ = load_condition(path)
-                except (OSError, ValueError):
+                    reps, _ = load_condition(
+                        path, keep=SLIM_KEEP if slim else None)
+                except (OSError, ValueError, KeyError):
                     continue
-                data[T][dT][m] = reps
+                data[T][dT][m] = slim_reps(reps) if slim else reps
             if verbose and data[T][dT]:
                 print(f'  T={T} dT={dT}: m={sorted(data[T][dT])} '
                       f'({len(next(iter(data[T][dT].values())))} reps)')
@@ -337,16 +379,6 @@ def mean_sd(vals: np.ndarray) -> Tuple[float, float]:
     return float(vals.mean()), float(vals.std(ddof=1))
 
 
-def mean_se(vals: np.ndarray) -> Tuple[float, float]:
-    vals = np.asarray(vals, dtype=float)
-    vals = vals[np.isfinite(vals)]
-    if vals.size == 0:
-        return np.nan, np.nan
-    if vals.size == 1:
-        return float(vals[0]), 0.0
-    return float(vals.mean()), float(vals.std(ddof=1) / np.sqrt(vals.size))
-
-
 def paired_difference(idx_a: np.ndarray, vals_a: np.ndarray,
                       idx_b: np.ndarray, vals_b: np.ndarray
                       ) -> Tuple[float, float, int]:
@@ -428,16 +460,6 @@ def realized_dT_summary(reps: Sequence[Dict]) -> Tuple[float, float]:
 # 7. MISC
 # ============================================================
 
-def mean_pairwise_distance(X: np.ndarray) -> float:
-    """Mean pairwise Euclidean distance between the columns of X. Retained for
-    ad-hoc checks; replicates carry their own `task_dT_realized`."""
-    T = X.shape[1]
-    if T < 2:
-        return np.nan
-    return float(np.mean([np.linalg.norm(X[:, i] - X[:, j])
-                          for i, j in combinations(range(T), 2)]))
-
-
 def panel_label(i: int) -> str:
     """A, B, ... Z, AA, AB, ... so a figure never runs out of panel labels."""
     s = ''
@@ -446,3 +468,137 @@ def panel_label(i: int) -> str:
         i, r = divmod(i - 1, 26)
         s = chr(65 + r) + s
     return s
+
+
+# ============================================================
+# 8. VISUAL GRAMMAR
+# ============================================================
+"""One channel, one meaning, in every main-text and supplementary figure.
+
+  colour      mean pairwise task divergence, dT      (viridis_r, dark = high)
+  linestyle   distinguishes series sharing a panel    (dotted 1, dashed T/2,
+              -- in practice simultaneity, m            solid T; SOLID whenever
+                                                        a panel holds one m)
+  marker      number of programs, K                  (only where K varies)
+  shaded band dispersion                             (+/- 1 SD, or +/- 1 SE for
+                                                      paired differences)
+
+A channel is never used for two things at once, and a quantity already carried
+by an axis is not also carried by colour. Reference lines are solid grey, since
+dotted now means m = 1.
+"""
+
+# --- linestyle: simultaneity -------------------------------------------
+LS_M1 = (0, (1, 1.1))        # dense dots; sparse dots vanish at print size
+LS_MHALF = (0, (5, 2))
+LS_MT = '-'
+
+
+def ls_for_m(m: Optional[int], T: Optional[int] = None):
+    """Linestyle for a simultaneity level. m=None -> solid (m not varying).
+
+    At T=2 the intermediate level coincides with the sequential limit, so it
+    correctly returns the dotted style.
+    """
+    if m is None:
+        return LS_MT
+    if m == 1:
+        return LS_M1
+    if T is not None and m >= T:
+        return LS_MT
+    return LS_MHALF
+
+
+def m_label(m: Optional[int], T: Optional[int] = None) -> str:
+    if m is None:
+        return ''
+    if m == 1:
+        return r'$m = 1$'
+    if T is not None and m >= T:
+        return r'$m = T$'
+    return r'$m = T/2$'
+
+
+# --- marker: number of programs ----------------------------------------
+MARKER_FOR_K = {4: 'o', 6: 's', 8: '^'}
+
+# --- dispersion: shaded band, never caps -------------------------------
+def band(ax, x, mu, err, color, ls='-', label=None, lw=1.7, alpha=0.16,
+         marker=None, ms=4.5, zorder=2):
+    """Mean line over a +/- err band. Bands sit below every line so that no
+    line is buried by a neighbour's band."""
+    x = np.asarray(x, dtype=float)
+    mu = np.asarray(mu, dtype=float)
+    err = np.asarray(err, dtype=float)
+    ok = np.isfinite(mu)
+    if ok.sum() == 0:
+        return None
+    ax.fill_between(x[ok], (mu - err)[ok], (mu + err)[ok], color=color,
+                    alpha=alpha, lw=0, zorder=zorder)
+    line, = ax.plot(x[ok], mu[ok], color=color, ls=ls, lw=lw, label=label,
+                    marker=marker, ms=ms if marker else 0,
+                    markerfacecolor='none', markeredgecolor=color,
+                    markeredgewidth=1.1, zorder=zorder + 10)
+    return line
+
+
+# --- axes: the frame carries the bound, so no y=1 rule is drawn --------
+METRIC_YLIM = {'differentiation': (0.0, 1.0), 'optimization': (0.0, 1.0)}
+
+
+def metric_axis(ax, metric: str, ylabel: bool = True):
+    """Identical limits for a given metric in every figure, so panels are
+    comparable by eye and the bound at 1 is the top spine."""
+    if metric in METRIC_YLIM:
+        ax.set_ylim(*METRIC_YLIM[metric])
+    if ylabel:
+        ax.set_ylabel(metric_label(metric))
+
+
+CUTOFF_COLOR = 'darkred'      # comparison points, distinct from the data
+
+
+def mark_K_line(ax, at: float, label: Optional[str] = None,
+                show_label: bool = True, fontsize: float = 11):
+    """Solid grey reference at T = K."""
+    ax.axvline(at, color='0.68', ls='-', lw=0.9, zorder=0)
+    if show_label and label:
+        ax.annotate(label, xy=(at, 1.0), xycoords=('data', 'axes fraction'),
+                    xytext=(3, -3), textcoords='offset points',
+                    fontsize=fontsize, color='0.45', ha='left', va='top')
+
+
+def mark_cutoff(ax, at: float, label: Optional[str] = None, axis: str = 'x',
+                fontsize: float = 10):
+    """A comparison point, in dark red so it cannot be read as data."""
+    # Above the dispersion bands (zorder 2) but below the mean lines (12), or
+    # the band alpha desaturates it to grey.
+    (ax.axvline if axis == 'x' else ax.axhline)(
+        at, color=CUTOFF_COLOR, ls='-', lw=1.2, zorder=5)
+    if not label:
+        return
+    if axis == 'x':
+        ax.annotate(label, xy=(at, 1.0), xycoords=('data', 'axes fraction'),
+                    xytext=(3, -3), textcoords='offset points',
+                    fontsize=fontsize, color=CUTOFF_COLOR, ha='left', va='top')
+    else:
+        # right-aligned: the upper left of a panel is usually where the key is
+        ax.annotate(label, xy=(0.99, at), xycoords=('axes fraction', 'data'),
+                    xytext=(0, 4), textcoords='offset points',
+                    fontsize=fontsize, color=CUTOFF_COLOR, ha='right',
+                    va='bottom')
+
+
+def m_legend(ax, levels=('1', 'T/2', 'T'), loc='lower left', fontsize=11,
+             **kw):
+    """Neutral-grey key for the linestyle channel, so the swatches cannot be
+    mistaken for a particular dT."""
+    from matplotlib.lines import Line2D
+    style = {'1': (LS_M1, r'$m = 1$'), 'T/2': (LS_MHALF, r'$m = T/2$'),
+             'T': (LS_MT, r'$m = T$')}
+    handles = [Line2D([], [], color='0.35', ls=style[k][0], lw=1.7,
+                      label=style[k][1]) for k in levels if k in style]
+    return ax.legend(handles=handles, loc=loc, fontsize=fontsize,
+                     frameon=False, handlelength=2.6, **kw)
+
+

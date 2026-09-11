@@ -2,34 +2,20 @@
 """
 fig_tsweep.py
 =============
-Differentiation and optimization against task number, at two points along the
-trajectory, with the simultaneity m held fixed across the whole figure.
+Figures 2 and 3: differentiation and optimization against task number, at an
+early and a late cutoff, with simultaneity held fixed across the whole figure.
+F2 is sequential selection (m = 1), F3 simultaneous (m = T). Both are generated
+from this one module so that the two figures a reader is asked to compare cannot
+diverge in how a cutoff is resolved or how differentiation is normalized.
 
-F2 and F3 differ only in that setting: F2 is sequential selection (m=1) and F3
-is simultaneous selection (m=T). They are generated from this one module so
-that the two panels a reader is asked to compare cannot diverge in how a cutoff
-is resolved or how differentiation is normalized.
+Panel letters start at B; panel A is the schematic, added in LaTeX.
 
-  Row 1  degree of differentiation, mean pairwise phenotype distance over each
-         replicate's own realized task divergence
-  Row 2  degree of optimization, 1 - ||d||_2 / sqrt(T)
-  Cols   two cutoffs, early and late
-  Lines  one per task divergence, viridis_r
-
-Points are means across replicates and bars are +/- 1 SD. Each replicate is an
-independent draw of an initial genome and a task ensemble, so the SD describes
-variation in the plotted quantity across task worlds rather than path noise
-within one.
-
-The vertical marker at T = K matters for the argument: to its left there are at
-least as many programs as tasks, so a decline there cannot be explained by a
-shortage of programs.
+The mark at T = K carries part of the argument: to its left there are at least
+as many programs as tasks, so a decline there cannot be a shortage of programs.
 
 Usage:
-  python3 fig_tsweep.py --which F2
-  python3 fig_tsweep.py --which F3
-  python3 fig_tsweep.py --which F2 --cutoff_kind exposure --cutoffs 50 100
-  python3 fig_tsweep.py --which F3 --gamma 4.0 --filename FS_gamma4_mT
+  python3 fig_tsweep.py --which F2 --plain_name
+  python3 fig_tsweep.py --which F3 --cutoff_kind exposure --cutoffs 50 100
 """
 
 # --- repo root on sys.path, so this script runs from any working directory ---
@@ -72,6 +58,7 @@ class FigConfig:
     show_K_line: bool = True
     K_line_label: bool = True
     annotate_cutoff: bool = True
+    panel_offset: int = 1          # panel A is the schematic, added in LaTeX
 
 
 PRESETS = {
@@ -98,11 +85,19 @@ def make_figure(data, spec: FL.CacheSpec, cutoffs: List[FL.Cutoff],
     t_values = np.array(spec.T_values)
     rows = ['differentiation', 'optimization']
 
+    # Linestyle distinguishes series that share a panel, and nothing else.
+    # This figure holds m fixed throughout, so every line is solid and the
+    # regime is named in the title; dashing them would ask the reader to decode
+    # a key that appears only in Figure 4.
+    ls_fig = FL.LS_MT
+
     for col, cutoff in enumerate(cutoffs):
         for row, metric in enumerate(rows):
             ax = axes[row][col]
             ax.set_box_aspect(1)
-            ax.text(-0.15, 1.08, FL.panel_label(row * len(cutoffs) + col),
+            ax.text(-0.15, 1.08,
+                    FL.panel_label(row * len(cutoffs) + col
+                                   + fig_cfg.panel_offset),
                     transform=ax.transAxes, fontsize=14, fontweight='bold',
                     va='top', ha='left')
 
@@ -126,29 +121,19 @@ def make_figure(data, spec: FL.CacheSpec, cutoffs: List[FL.Cutoff],
                         xs.append(T); ys.append(mu); sds.append(sd)
 
                 if xs:
-                    ax.errorbar(xs, ys, yerr=sds, fmt='-o', color=colors[dT],
-                                lw=0.75, ms=5, markerfacecolor='none',
-                                markeredgecolor=colors[dT], capsize=2,
-                                capthick=1.0, elinewidth=1.0)
+                    FL.band(ax, xs, ys, sds, color=colors[dT], ls=ls_fig)
 
             ax.set_xticks(t_values)
             ax.set_xticklabels([str(int(v)) for v in t_values])
             ax.set_xlabel('Number of tasks')
 
             if fig_cfg.show_K_line and t_values.min() <= spec.K <= t_values.max():
-                ax.axvline(spec.K, color='gray', ls=':', lw=1.0, alpha=0.8,
-                           zorder=0)
-                if fig_cfg.K_line_label and row == 0:
-                    ax.annotate(f'$T=K={spec.K}$', xy=(spec.K, 1.0),
-                                xycoords=('data', 'axes fraction'),
-                                xytext=(3, -3), textcoords='offset points',
-                                fontsize=8, color='gray', ha='left', va='top')
+                FL.mark_K_line(
+                    ax, spec.K, label=f'$K = {spec.K}$',
+                    show_label=(fig_cfg.K_line_label and row == 0 and col == 0))
 
-            ax.axhline(1, color='gray', ls='--', lw=0.8, alpha=0.5)
-            ax.set_ylim(0, 1.05)
-            if col == 0:
-                ax.set_ylabel(FL.metric_label(metric))
-            else:
+            FL.metric_axis(ax, metric, ylabel=(col == 0))
+            if col != 0:
                 ax.tick_params(labelleft=False)
 
     FL.add_dt_colorbar(fig, spec.task_divs)
@@ -213,6 +198,12 @@ def parse_args():
     p.add_argument('--save_dir', default=_repo_path('figures_out'))
     p.add_argument('--filename', default=None)
     p.add_argument('--fmt', default='pdf')
+    p.add_argument('--plain_name', action='store_true',
+                   help='Write F2.pdf rather than F2_gamma1.0_fr0.0_....pdf, '
+                        'i.e. the name the manuscript \\includegraphics '
+                        'expects. The parameterised name is the safe default '
+                        'because it cannot silently overwrite a figure made '
+                        'at different parameters.')
     p.add_argument('--L', type=int, default=100)
     p.add_argument('--K', type=int, default=4)
     p.add_argument('--gamma', type=float, default=1.0)
@@ -223,7 +214,7 @@ def parse_args():
     p.add_argument('--dT', type=float, nargs='+',
                    default=[0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4],
                    dest='task_divs')
-    p.add_argument('--cutoffs', type=int, nargs='+', default=[50, 200])
+    p.add_argument('--cutoffs', type=int, nargs='+', default=[50, 400])
     p.add_argument('--cutoff_kind', default='substitutions',
                    choices=['substitutions', 'exposure'],
                    help='substitutions: same evolutionary change (primary). '
@@ -249,17 +240,20 @@ if __name__ == '__main__':
                for c in args.cutoffs]
 
     print(f'Loading {spec.label()} ...')
-    want = None if args.which == 'F2' else None      # load all m, pick later
+    # Load only the simultaneity this figure plots: F2 needs m=1, F3 needs
+    # m=T. Loading every m was the dominant cost and none of it was plotted.
+    want = 'min' if preset['m_selector'] == 'min' else 'T'
     data = FL.load_grid(spec, m_values=want)
 
     os.makedirs(args.save_dir, exist_ok=True)
     stem = args.filename or preset['filename']
     tag = ('' if args.cutoff_kind == 'substitutions'
            else f'_exposure{args.exposure_mode}')
-    path = os.path.join(
-        args.save_dir,
-        f'{stem}{tag}_gamma{args.gamma}_fr{args.fitness_r}'
-        f'_K{args.K}_density{args.density:.4f}.{args.fmt}')
+    path = os.path.join(args.save_dir, f'{stem}.{args.fmt}') \
+        if args.plain_name else os.path.join(
+            args.save_dir,
+            f'{stem}{tag}_gamma{args.gamma}_fr{args.fitness_r}'
+            f'_K{args.K}_density{args.density:.4f}.{args.fmt}')
 
     fig = make_figure(data, spec, cutoffs, fig_cfg, save_path=path)
     if not args.no_summary:
