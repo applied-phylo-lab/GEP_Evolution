@@ -16,6 +16,14 @@ authors:
     family-names: Pennell
     affiliation: "Department of Computational Biology, Cornell University, United States"
 repository-code: "https://github.com/applied-phylo-lab/GEP_Evolution"
+doi: "10.5281/zenodo.22782584"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.22782584"
+    description: "Concept DOI, resolves to the latest version"
+  - type: doi
+    value: "10.5281/zenodo.22782585"
+    description: "DOI for version v1.0.0"
 license: MIT
 version: 1.0.0
 date-released: "2026-09-16"

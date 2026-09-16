@@ -82,7 +82,7 @@ If you use this code, please cite the archived software release:
 
 > Kim M, Pennell M. Simulation code associated with the manuscript
 > "Unicellular and Multicellular Modes of Selection Impose Distinct Constraints
-> on Cellular Phenotype Evolution" (2026). Zenodo. doi:FILL IN
+> on Cellular Phenotype Evolution" (2026). Zenodo. doi:10.5281/zenodo.22782584
 
 A citation for the manuscript will be added here once it is published.
 
