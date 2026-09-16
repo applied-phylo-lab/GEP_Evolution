@@ -1,6 +1,8 @@
 # Unicellular and Multicellular Modes of Selection Impose Distinct Constraints on Cellular Phenotype Evolution
 
-Simulation code for Kim & Pennell.
+Simulation code associated with the manuscript "Unicellular and Multicellular
+Modes of Selection Impose Distinct Constraints on Cellular Phenotype
+Evolution."
 
 A genome is a binary matrix `G` in {0,1}^(L x K) mapping `L` loci onto `K` gene
 expression programs. For each of `T` tasks it deploys the non-negative program
@@ -76,14 +78,13 @@ so that program number varies without also changing genotype-matrix density.
 
 ## How to cite
 
-Please cite the paper, and the archived software release if you use the code:
+If you use this code, please cite the archived software release:
 
-> Kim M, Pennell M. Unicellular and Multicellular Modes of Selection Impose
-> Distinct Constraints on Cellular Phenotype Evolution. *Molecular Biology and
-> Evolution* (2026). doi:FILL IN
+> Kim M, Pennell M. Simulation code associated with the manuscript
+> "Unicellular and Multicellular Modes of Selection Impose Distinct Constraints
+> on Cellular Phenotype Evolution" (2026). Zenodo. doi:FILL IN
 
-> Kim M, Pennell M. GEP_Evolution: simulation code (2026).
-> Zenodo. doi:FILL IN
+A citation for the manuscript will be added here once it is published.
 
 `CITATION.cff` carries the same information in machine-readable form; GitHub
 renders it under "Cite this repository".

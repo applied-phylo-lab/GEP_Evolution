@@ -1,7 +1,7 @@
 {
   "upload_type": "software",
   "title": "Unicellular and Multicellular Modes of Selection Impose Distinct Constraints on Cellular Phenotype Evolution: simulation code",
-  "description": "<p>Simulation code accompanying Kim &amp; Pennell, <em>Unicellular and Multicellular Modes of Selection Impose Distinct Constraints on Cellular Phenotype Evolution</em>.</p><p>A genome is a binary matrix mapping loci onto gene expression programs. For each task it deploys the non-negative program combination that best approximates that task's optimum. During each selective epoch <em>m</em> of the <em>T</em> task-specific phenotypes contribute jointly to fitness: <em>m</em> = 1 is sequential selection, <em>m</em> = <em>T</em> simultaneous, and intermediate <em>m</em> interpolates. The repository contains the SSWM engine, the run driver, and one script per manuscript figure.</p>",
+  "description": "<p>Simulation code associated with the manuscript &quot;Unicellular and Multicellular Modes of Selection Impose Distinct Constraints on Cellular Phenotype Evolution&quot;.</p><p>A genome is a binary matrix mapping loci onto gene expression programs. For each task it deploys the non-negative program combination that best approximates that task's optimum. During each selective epoch <em>m</em> of the <em>T</em> task-specific phenotypes contribute jointly to fitness: <em>m</em> = 1 is sequential selection, <em>m</em> = <em>T</em> simultaneous, and intermediate <em>m</em> interpolates. The repository contains the SSWM engine, the run driver, and one script per manuscript figure.</p>",
   "license": "MIT",
   "access_right": "open",
   "creators": [

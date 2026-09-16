@@ -1,6 +1,6 @@
 cff-version: 1.2.0
-message: "If you use this software, please cite both the software and the paper."
-title: "GEP_Evolution: simulation code for Kim & Pennell"
+message: "If you use this software, please cite the archived release."
+title: "Simulation code associated with the manuscript 'Unicellular and Multicellular Modes of Selection Impose Distinct Constraints on Cellular Phenotype Evolution'"
 abstract: >-
   Strong-selection weak-mutation simulations of gene expression program
   evolution in which the number of task-specific phenotypes contributing
@@ -33,5 +33,5 @@ preferred-citation:
       family-names: Kim
     - given-names: Matt
       family-names: Pennell
-  journal: "Molecular Biology and Evolution"
   year: 2026
+  notes: "Manuscript in preparation or under review; journal and DOI to be added on publication."
