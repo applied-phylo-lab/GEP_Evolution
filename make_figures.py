@@ -6,11 +6,9 @@ Regenerate every figure in the manuscript and the supplement, under the names
 the LaTeX source expects.
 
 Each figure script prints `Saved: <path>`; this runner reads that line and moves
-the result to its canonical name, so figures_out holds only F1-F4 and FS1-FS6
-and the figure-to-file mapping lives in one place. Running a figure script
-directly still produces its parameterised name, which is the safe default
-because it cannot overwrite another parameter set. Figure 1 is hand-made and is
-copied from assets/.
+the result to its canonical name, so figures_out holds only F1-F4 and FS1-FS6.
+Running a figure script directly produces its parameterised name instead.
+Figure 1 is hand-made and is copied from assets/.
 
 Requires the simulation cache; build it with `python3 make_data.py`.
 
@@ -40,7 +38,9 @@ FIGURES = [
      'negative power-mean fitness, r = -2'),
     ('FS3', 'fig_regimes.py',      ['--gamma', '4.0'],
      'sharper performance function, gamma = 4'),
-    ('FS4', 'compare_K.py',        ['--K', '4', '6', '8', '--cutoff', '400',
+    ('FS4', 'compare_K.py',        ['--K', '4', '6', '8',
+                                    '--T', '2', '3', '4', '6', '8', '9', '12', '16',
+                                    '--cutoff', '400',
                                     '--cutoff_scale', 'fixed'],
      'program number, T/K on the x-axis'),
     ('FS5', 'fig_regimes.py',      ['--density', '0.5'],
@@ -58,8 +58,7 @@ def run_one(name, script, extra, verbose):
         shutil.copy2(src, dst)
         return dst
     path = os.path.join(REPO, 'figures', script)
-    # Not every script defines --no_summary; ask the script itself rather than
-    # keeping a list here that will drift.
+    # Not every script defines --no_summary; ask the script itself.
     src = io.open(path, encoding='utf-8').read()
     quiet = ['--no_show'] + (['--no_summary'] if "'--no_summary'" in src else [])
     cmd = [sys.executable, path] + quiet + extra
@@ -75,9 +74,7 @@ def run_one(name, script, extra, verbose):
     produced = hits[-1]
     canonical = os.path.join(OUT, f'{name}.pdf')
     if os.path.abspath(produced) != os.path.abspath(canonical):
-        # move, so figures_out only ever holds F1-F4 and FS1-FS6. Running a
-        # figure script directly still gives the parameterised name, which is
-        # the safe default because it cannot overwrite another parameter set.
+        # move, so figures_out only ever holds F1-F4 and FS1-FS6
         shutil.move(produced, canonical)
     return canonical
 

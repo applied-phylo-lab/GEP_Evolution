@@ -38,7 +38,7 @@ control; the composited PDFs are distributed with the manuscript.
 | S1 | `figures/fig_termination.py` | |
 | S2 | `figures/fig_regimes.py`     | `--fitness_r -2.0` |
 | S3 | `figures/fig_regimes.py`     | `--gamma 4.0` |
-| S4 | `figures/compare_K.py`       | `--K 4 6 8 --cutoff 400 --cutoff_scale fixed` |
+| S4 | `figures/compare_K.py`       | `--K 4 6 8 --T 2 3 4 6 8 9 12 16 --cutoff 400 --cutoff_scale fixed` |
 | S5 | `figures/fig_regimes.py`     | `--density 0.5` |
 | S6 | `figures/fig_msweep.py`      | |
 

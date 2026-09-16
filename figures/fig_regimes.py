@@ -4,12 +4,8 @@ fig_regimes.py
 ==============
 Figures S2, S3 and S5: sequential against simultaneous selection at a single
 cutoff. Rows are the two metrics, columns the two regimes, lines one per task
-divergence.
-
-This is the layout for every supplementary robustness analysis, so each is one
-command producing one file. The main-text figures instead spend their columns on
-the early and late phases, because the change between them is part of the
-result; a robustness check needs only the endpoint.
+divergence. This is the shared layout for the supplementary robustness
+analyses, so each is one command producing one file.
 
 Usage:
   python3 fig_regimes.py --fitness_r -2.0     # S2
@@ -83,8 +79,7 @@ def make_figure(data, spec: FL.CacheSpec, cutoff: FL.Cutoff,
                     if np.isfinite(mu):
                         xs.append(T); ys.append(mu); sds.append(sd)
                 if xs:
-                    # One m per panel, so every line is solid; see the visual
-                    # grammar in figlib.
+                    # One m per panel, so every line is solid.
                     FL.band(ax, xs, ys, sds, color=colors[dT], ls=FL.LS_MT)
 
             ax.set_xticks(t_values)
@@ -187,8 +182,7 @@ if __name__ == '__main__':
     cutoff = FL.Cutoff(args.cutoff_kind, args.cutoff, args.exposure_mode)
 
     print(f'Loading {spec.label()} ...')
-    # Only the two limits are plotted; loading the intermediate levels was
-    # enough to exhaust memory at T = 8.
+    # Only the two limits are plotted.
     data = FL.load_grid(spec, m_values=lambda T: [1, T])
 
     os.makedirs(args.save_dir, exist_ok=True)

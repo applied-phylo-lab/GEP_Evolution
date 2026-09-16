@@ -4,11 +4,9 @@ make_data.py
 ============
 Generate every simulation condition used by the manuscript and the supplement.
 
-This is the reproducibility entry point. `run_batch.py`'s SPECS cover the
-baseline and three robustness axes, but the two program-number sweeps were
-originally launched with command-line grid overrides that SPECS does not
-record, so a clone of the repository could not reproduce them. They are written
-out explicitly below.
+`run_batch.py`'s SPECS cover the baseline and three robustness axes; the two
+program-number sweeps were launched with command-line grid overrides that SPECS
+does not record, and are written out explicitly below.
 
 Task numbers are matched on the task-to-program ratio T/K = 0.5, 1, 1.5, 2:
 
@@ -20,7 +18,7 @@ this is safe to re-run and cheap to resume.
 
 Usage:
   python3 make_data.py --dry_run      # cost estimate for the whole paper
-  python3 make_data.py                # run everything (days on one machine)
+  python3 make_data.py                # run everything
   python3 make_data.py --only baseline programs_K8
 """
 import argparse, os, subprocess, sys, time

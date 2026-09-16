@@ -3,10 +3,8 @@
 compare_K.py
 ============
 Figure S4: differentiation and optimization against the task-to-program ratio
-T/K, for several program numbers.
-
-Program number is the marker channel here, because linestyle is reserved for
-simultaneity, which this figure splits across columns instead.
+T/K, for several program numbers. Program number is the marker channel, since
+linestyle is reserved for simultaneity, which this figure splits across columns.
 
 Task numbers are matched on the ratio T/K = 0.5, 1, 1.5, 2:
   K = 4  ->  T = 2, 4, 6, 8
@@ -74,9 +72,9 @@ def collect(K_values: List[int], T_by_K: Dict[int, List[int]], args,
 
 
 def cutoffs_by_K(K_values, base: int, kind: str, scale: str) -> Dict[int, FL.Cutoff]:
-    """One cutoff per program number. Under 'genome' scaling the cutoff grows
-    in proportion to K, so each program number is read after the same number of
-    substitutions per genotype entry; see the module docstring."""
+    """One cutoff per program number; under 'genome' scaling it grows in
+        proportion to K.
+    """
     Ks = sorted(K_values)
     if scale == 'fixed' or kind == 'exposure' or not Ks:
         return {K: FL.Cutoff(kind, base) for K in Ks}
@@ -87,7 +85,8 @@ def cutoffs_by_K(K_values, base: int, kind: str, scale: str) -> Dict[int, FL.Cut
 def series(entry, metric: str, dT: float, regime: str, cutoff: FL.Cutoff,
            x_axis: str = 'tasks'):
     """(x, mean, sd) across the T values present for one K, where x is either
-    the task number or the task-to-program ratio."""
+        the task number or the task-to-program ratio.
+    """
     spec, data = entry['spec'], entry['data']
     xs, ys, sds = [], [], []
     for T in spec.T_values:
@@ -106,12 +105,7 @@ def series(entry, metric: str, dT: float, regime: str, cutoff: FL.Cutoff,
 
 
 def print_interaction(caches, cutoffs, task_divs):
-    """Effect of adding programs, at each task number and in each regime.
-
-    This is the quantity the figure exists to show. A gain that is flat in T
-    under sequential selection but grows with T under simultaneous selection is
-    the signature of program number limiting one regime and not the other.
-    """
+    """Effect of adding programs, at each task number and in each regime."""
     Ks = sorted(caches)
     if len(Ks) < 2:
         return
@@ -203,8 +197,7 @@ def make_figure(caches, task_divs, cutoffs, x_axis='ratio', save_path=None):
                         left=0.12, right=0.88, top=0.90, bottom=0.14)
 
     colors = FL.dt_colors(task_divs)
-    # Linestyle is reserved for simultaneity, which is split across columns
-    # here, so program number takes the marker channel instead.
+    # Program number takes the marker channel; see the module docstring.
     markers = {K: FL.MARKER_FOR_K.get(K, 'o') for K in sorted(caches)}
     rows = [('differentiation', 'Degree of differentiation'),
             ('optimization', 'Degree of optimization')]
@@ -282,7 +275,7 @@ def parse_args():
     p.add_argument('--fmt', default='pdf')
     p.add_argument('--L', type=int, default=100)
     p.add_argument('--K', type=int, nargs='+', default=[4, 6], dest='K_values')
-    p.add_argument('--T', type=int, nargs='+', default=[2, 3, 4, 6, 8, 9, 12],
+    p.add_argument('--T', type=int, nargs='+', default=[2, 3, 4, 6, 8, 9, 12, 16],
                    dest='T_values',
                    help='Candidate T values; those without a cache are skipped.')
     p.add_argument('--dT', type=float, nargs='+', default=[0.2, 0.8, 1.4],

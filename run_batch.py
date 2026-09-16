@@ -14,11 +14,7 @@ subdirectory inside it, so densities sweep within one call.
   gamma       K=4, gamma=4, r=0,  density 0.25, m in {1,T} -> S3
   programs    K=6, gamma=1, r=0,  density 0.25, m in {1,T} -> S4
 
-Density is held at 0.25 in every spec, including the program-number sweep, so
-that K varies without also changing the density of the genotype matrix.
-
-Robustness specs contrast sequential against simultaneous selection only. The
-intermediate m sweep dominates cost at large T and none of them use it.
+Density is held at 0.25 in every spec, including the program-number sweep.
 
 The program-number sweep needs its task grid on the command line, matched on
 T/K = 0.5, 1, 1.5, 2. `make_data.py` records those invocations and is the
@@ -145,9 +141,9 @@ def environment_record() -> dict:
 
 
 def default_workers() -> int:
-    """Usable worker count. Prefers the CPU affinity mask over os.cpu_count(),
-    since the mask reflects any restriction placed on the process (cgroup,
-    taskset, container) while the count reports the whole machine."""
+    """Usable worker count, preferring the CPU affinity mask over os.cpu_count()
+        so that any cgroup, taskset or container restriction is respected.
+    """
     try:
         return len(os.sched_getaffinity(0))
     except AttributeError:
@@ -155,13 +151,8 @@ def default_workers() -> int:
 
 
 def calibrate_solve_time(L: int, K: int, n: int = 2000, seed: int = 0) -> float:
-    """Seconds per mutant evaluation on this machine.
-
-    The unit counted by `simulate.estimate_cost` is one mutant-task evaluation:
-    copy the genome, flip a bit, solve the NNLS, take the residual and the
-    performance. Timing that whole operation rather than the bare solver keeps
-    the estimate honest about copy and norm overhead, which is not negligible
-    at these matrix sizes.
+    """Seconds per mutant evaluation on this machine: copy the genome, flip a
+        bit, solve the NNLS, take the residual and the performance.
     """
     rng = np.random.default_rng(seed)
     genome = (rng.random((L, K)) < 0.25).astype(float)
@@ -192,8 +183,9 @@ def format_hours(seconds: float) -> str:
 # ============================================================
 
 def send_email(subject: str, body: str, to_addr: str) -> str:
-    """Send via SMTP if SMTP_HOST is set, otherwise hand off to a local
-    sendmail or mail binary. Returns a short status string; never raises."""
+    """Send via SMTP if SMTP_HOST is set, otherwise hand off to a local sendmail
+        or mail binary. Returns a short status string; never raises.
+    """
     if not to_addr:
         return 'skipped (no SIM_NOTIFY_EMAIL)'
 
@@ -240,8 +232,7 @@ def send_email(subject: str, body: str, to_addr: str) -> str:
 # ============================================================
 
 def cost_of(cfg: dict) -> dict:
-    """Plan one spec without running it. Loads or builds task ensembles, since
-    the work list cannot be expanded without them."""
+    """Plan one spec without running it."""
     alpha_maps, ensembles = {}, {}
     for T in cfg['T_VALUES']:
         a, e, _ = S.ensure_task_ensembles(

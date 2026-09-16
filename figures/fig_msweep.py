@@ -5,15 +5,10 @@ fig_msweep.py
 Figure S6: gain over sequential selection, metric(m) - metric(m=1), against m.
 
 Bands are the standard error of the within-replicate paired difference, not the
-spread across replicates. Replicate i shares its initial genome and task
-ensemble across every m, so the paired difference removes the between-world
-variance that dominates the error bands of Figure 4; the bands here are
-correspondingly much narrower, and answer a different question.
+spread across replicates. Colour is task divergence, on the scale shared with
+every other figure, so this figure carries no colour key of its own.
 
-Colour is task divergence, on the scale shared with every other figure, so this
-figure carries no colour key of its own.
-
-One task number is loaded at a time. This is the only figure that needs every
+One task number is loaded at a time; this is the only figure that needs every
 simultaneity level, and the whole grid does not fit in memory at once.
 """
 
@@ -64,10 +59,8 @@ class FigConfig:
 def gain_curve(by_m: Dict[int, List], metric: str, cutoff: FL.Cutoff,
                baseline_m: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray,
                                          np.ndarray]:
-    """(m, gain, se, n) swept over the available simultaneity levels.
-
-    The baseline level itself is included with gain and se exactly zero; every
-    other level is a paired contrast against it.
+    """(m, gain, se, n) over the available simultaneity levels. The baseline
+        level is included with gain and se exactly zero.
     """
     if baseline_m not in by_m:
         return (np.array([]),) * 4
@@ -93,10 +86,8 @@ def gain_curve(by_m: Dict[int, List], metric: str, cutoff: FL.Cutoff,
 
 def fraction_of_gain(ms: np.ndarray, gains: np.ndarray,
                      T: int) -> Dict[int, float]:
-    """Percentage of the fully simultaneous gain present at each m.
-
-    Returns nan where the m=T gain is too small for the ratio to carry meaning;
-    a percentage of a near-zero denominator is noise, not a result.
+    """Percentage of the fully simultaneous gain present at each m, or nan where
+        the m=T gain is too small for the ratio to carry meaning.
     """
     if ms.size == 0 or T not in ms.astype(int):
         return {}
@@ -113,8 +104,8 @@ def fraction_of_gain(ms: np.ndarray, gains: np.ndarray,
 def make_figure(load_T, spec: FL.CacheSpec, cutoff: FL.Cutoff,
                 fig_cfg: FigConfig, save_path: Optional[str] = None):
     """`load_T` is called once per task number and its result released before
-    the next. This figure is the only one that needs every simultaneity level,
-    and holding the whole grid at once does not fit in memory."""
+        the next.
+    """
     FL.apply_style()
     n_cols = len(spec.T_values)
     fig, axes = plt.subplots(

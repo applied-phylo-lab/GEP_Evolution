@@ -6,16 +6,11 @@ Acceptance tests for simulate.py. Standard library plus numpy/scipy only.
 
     python test_simulate.py
 
-Two tests carry the real risk. The chunking test asserts that changing which
-process computes a replicate cannot change results, which rests on every seed
-being a pure function of (rep, condition) with no state carried between
-replicates. The lazy-enumeration test asserts that computing mutant
-performances one task column at a time, on demand, yields bit-identical
-trajectories to computing the whole table at every step. Re-run both after any
-change to seeding, the worker, or `_MutantPerformance`.
-
-Runtimes are kept short by using small L, K and substitution budgets; the tests
-check invariants and equivalences, not scientific behaviour.
+The chunking test asserts that changing which process computes a replicate
+cannot change results; the lazy-enumeration test asserts that computing mutant
+performances one task column at a time yields bit-identical trajectories to
+computing the whole table at every step. L, K and substitution budgets are kept
+small: these check invariants and equivalences, not scientific behaviour.
 """
 
 # --- repo root on sys.path, so this script runs from any working directory ---
@@ -46,9 +41,9 @@ PASS, FAIL = [], []
 
 
 def identical(a, b):
-    """Exact equality, treating NaN as equal to NaN. `modularity_entropy` is
-    NaN off the snapshot schedule, so plain `np.array_equal` would report two
-    identical trajectories as different."""
+    """Exact equality, treating NaN as equal to NaN. `modularity_entropy` is NaN
+        off the snapshot schedule.
+    """
     a, b = np.asarray(a), np.asarray(b)
     if a.shape != b.shape:
         return False

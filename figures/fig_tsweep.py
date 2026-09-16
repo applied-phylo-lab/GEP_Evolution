@@ -4,14 +4,11 @@ fig_tsweep.py
 =============
 Figures 2 and 3: differentiation and optimization against task number, at an
 early and a late cutoff, with simultaneity held fixed across the whole figure.
-F2 is sequential selection (m = 1), F3 simultaneous (m = T). Both are generated
-from this one module so that the two figures a reader is asked to compare cannot
-diverge in how a cutoff is resolved or how differentiation is normalized.
+F2 is sequential selection (m = 1), F3 simultaneous (m = T); both come from
+this one module.
 
-Panel letters start at B; panel A is the schematic, added in LaTeX.
-
-The mark at T = K carries part of the argument: to its left there are at least
-as many programs as tasks, so a decline there cannot be a shortage of programs.
+Panel letters start at B; panel A is the schematic, added in LaTeX. The mark at
+T = K separates the region with at least as many programs as tasks.
 
 Usage:
   python3 fig_tsweep.py --which F2 --plain_name
@@ -85,10 +82,8 @@ def make_figure(data, spec: FL.CacheSpec, cutoffs: List[FL.Cutoff],
     t_values = np.array(spec.T_values)
     rows = ['differentiation', 'optimization']
 
-    # Linestyle distinguishes series that share a panel, and nothing else.
-    # This figure holds m fixed throughout, so every line is solid and the
-    # regime is named in the title; dashing them would ask the reader to decode
-    # a key that appears only in Figure 4.
+    # m is fixed throughout, so every line is solid and the regime is named in
+    # the title.
     ls_fig = FL.LS_MT
 
     for col, cutoff in enumerate(cutoffs):
@@ -240,8 +235,7 @@ if __name__ == '__main__':
                for c in args.cutoffs]
 
     print(f'Loading {spec.label()} ...')
-    # Load only the simultaneity this figure plots: F2 needs m=1, F3 needs
-    # m=T. Loading every m was the dominant cost and none of it was plotted.
+    # Load only the simultaneity this figure plots: F2 needs m=1, F3 needs m=T.
     want = 'min' if preset['m_selector'] == 'min' else 'T'
     data = FL.load_grid(spec, m_values=want)
 

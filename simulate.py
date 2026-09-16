@@ -9,47 +9,33 @@ A genome is a binary matrix G in {0,1}^(L x K) mapping L loci onto K programs.
 For each of T tasks it deploys the non-negative program combination that best
 approximates that task's optimum, and performance decreases with the residual.
 Each selective epoch draws m of the T tasks and fitness is a power mean over
-them: m = 1 is sequential selection, m = T simultaneous, intermediate m
-interpolates.
+them: m = 1 is sequential selection, m = T simultaneous.
 
-Population genetics is haploid throughout:
-p_fix(s) = (1 - e^-2s) / (1 - e^-2Ns), neutral limit 1/N, mutation supply N*mu.
-Kimura's diploid form is not used and would need a dominance coefficient the
-presence/absence genotype matrix cannot represent.
+Fixation is haploid: p_fix(s) = (1 - e^-2s) / (1 - e^-2Ns), neutral limit 1/N,
+mutation supply N*mu.
 
-Termination, per replicate in `termination_reason`:
+`termination_reason`, per replicate:
   'n_subs'      the substitution budget was exhausted
-  'absorbing'   no single-bit mutant is beneficial under ANY admissible active
-                subset, so the genotype cannot change again
-  'redraw_cap'  MAX_REDRAWS consecutive draws produced nothing; a numerical
-                safeguard, not a frozen state, and reported separately
+  'absorbing'   no single-bit mutant is beneficial under any admissible active
+                subset
+  'redraw_cap'  MAX_REDRAWS consecutive draws produced nothing
 
-An empty beneficial set under the currently drawn subset is not termination when
-m < T: the drawn subset is one realization of a fluctuating environment, so the
-engine consumes the epoch, redraws and continues. Failed epochs still count
-toward each task's selective exposure.
+When m < T an empty beneficial set under the drawn subset is not termination:
+the epoch is consumed, the subset redrawn, and the walk continues. Failed
+epochs still count toward each task's selective exposure.
 
-Substitution budget: S(T, m) = max(floor, round(E*T/m) + 1), with E defaulting
-to L. This is E selective epochs per task in expectation, so conditions can be
-compared at matched exposure as well as at matched substitutions; the floor
-guarantees a common fixed-substitution cutoff at every (T, m).
+Substitution budget: S(T, m) = max(floor, round(E*T/m) + 1), E defaulting to L.
 
-Replicate i is one world: its own initial genome, seeded on (i, L, K, density),
-and its own task ensemble, seeded on (i, T, dT). Neither depends on m, so
-comparisons across m are paired.
+Seeding: replicate i has its own initial genome, seeded on (i, L, K, density),
+and its own task ensemble, seeded on (i, T, dT). Neither depends on m.
 
-Trajectory arrays come in two lengths and must not be conflated. STATE arrays
-have n_subs_realized + 1 entries, where index k is the genotype after exactly k
-substitutions. EVENT arrays have one fewer, where index k describes the
-substitution carrying state k to state k+1. There is no forward-filling: a
-replicate that terminated early has genuinely shorter arrays.
+Array lengths: STATE arrays have n_subs_realized + 1 entries, index k being the
+genotype after k substitutions. EVENT arrays have one fewer, index k describing
+the substitution from state k to state k+1. Arrays are not forward-filled.
 
 Cache layout:
-  tasks_L{L}_v{V}/taskens_T{T}.npz                       per-replicate ensembles
+  tasks_L{L}_v{V}/taskens_T{T}.npz
   L{L}_K{K}_gamma{G}_fr{R}_v{V}/density{D}/sim_T{T}_dT{dT}_m{m}_alpha{A}.npz
-
-Task optima depend only on (L, T, dT), so they sit outside the parameter root
-and are shared across K, gamma and fitness_r.
 
 Usage:
   python simulate.py --dry_run
@@ -107,14 +93,12 @@ def _seed_from(key: str) -> int:
 
 
 def make_genome_seed(rep: int, L: int, K: int, density: float) -> int:
-    """Initial genome seed. Independent of T, dT and m, so replicate `rep`
-    starts from the same genome in every condition."""
+    """Initial genome seed; independent of T, dT and m."""
     return _seed_from(f'genome_{rep}_{L}_{K}_{density:.10g}')
 
 
 def make_ensemble_seed(rep: int, T: int, dT: float) -> int:
-    """Task ensemble seed. Independent of m, so comparisons across m are
-    paired on the task ensemble as well as on the initial genome."""
+    """Task ensemble seed; independent of m."""
     return _seed_from(f'ensemble_{rep}_{T}_{dT:.10g}')
 
 
@@ -147,8 +131,8 @@ def compute_mean_pairwise_distance(tasks: np.ndarray) -> float:
 def find_alpha_for_target(target_dist: float, L: int, T: int,
                           n_seeds: int = 30, tol: float = 0.02) -> float:
     """Bisect in log-space for the alpha whose expected mean pairwise task
-    divergence matches `target_dist`. The expectation is over n_seeds draws;
-    individual ensembles scatter around it."""
+        divergence matches `target_dist`.
+    """
     def mean_dist(alpha):
         return np.mean([compute_mean_pairwise_distance(
             create_dirichlet_tasks(L, T, alpha, s)) for s in range(n_seeds)])
@@ -168,12 +152,11 @@ def find_alpha_for_target(target_dist: float, L: int, T: int,
 
 def build_task_ensembles(T: int, L: int, task_divergences: List[float],
                          n_ensembles: int) -> Tuple[Dict, Dict, Dict]:
-    """Calibrate one alpha per dT, then draw `n_ensembles` independent
-    ensembles at that alpha.
+    """Calibrate one alpha per dT and draw `n_ensembles` ensembles at each.
 
-    Returns (alpha_map, ensembles, realized), where ensembles[dT] has shape
-    (n_ensembles, L, T) and realized[dT] holds each ensemble's actual mean
-    pairwise divergence.
+        Returns (alpha_map, ensembles, realized); ensembles[dT] is
+        (n_ensembles, L, T) and realized[dT] holds each ensemble's mean pairwise
+        divergence.
     """
     alpha_map, ensembles, realized = {}, {}, {}
 
@@ -205,9 +188,9 @@ def make_genome(L: int, K: int, density: float, seed: int) -> np.ndarray:
 # ============================================================
 
 def _task_performance(genome: np.ndarray, task: np.ndarray, gamma: float):
-    """(d, P, a, z) for one task: the residual distance of the optimal
-    non-negative deployment, the resulting performance, the activation vector,
-    and the expressed phenotype."""
+    """(d, P, a, z) for one task: residual distance of the optimal non-negative
+        deployment, performance, activation vector, expressed phenotype.
+    """
     a, _ = nnls(genome, task)
     z = genome @ a
     d = float(np.linalg.norm(task - z))
@@ -218,8 +201,7 @@ def compute_performance(genome: np.ndarray, tasks: np.ndarray,
                         gamma: float) -> Dict:
     """Optimal non-negative deployment of `genome` against each task.
 
-    Returns d (residual distances), P (performances), a (activation vectors),
-    usage (T, K) and phenotype (L, T).
+        Returns d, P, a, usage (T, K) and phenotype (L, T).
     """
     n_tasks = tasks.shape[1]
     d = np.zeros(n_tasks)
@@ -239,10 +221,7 @@ def compute_performance(genome: np.ndarray, tasks: np.ndarray,
 class _MutantPerformance:
     """Lazily filled (L*K, T) table of single-bit mutant performances.
 
-    Rows are row-major in (locus, program), so the mutated entry of row `i` is
-    `divmod(i, K)`. Columns are computed on demand and cached, because
-    selection only needs the active tasks; see "Cost: lazy mutant enumeration"
-    in the module docstring.
+        Row i mutates entry divmod(i, K); columns are computed on demand.
     """
 
     __slots__ = ('_genome', '_tasks', '_gamma', '_P', '_have', '_L', '_K', '_T')
@@ -285,7 +264,7 @@ class _MutantPerformance:
 
 
 def make_snapshot(genome: np.ndarray, cum_time: float) -> Dict:
-    """Snapshots store the genome only; see `expand_snapshot`."""
+    """Genome and cumulative time; see `expand_snapshot`."""
     return {'genome': genome.copy(), 'cum_time': float(cum_time)}
 
 
@@ -306,9 +285,7 @@ def expand_snapshot(snapshot: Dict, tasks: np.ndarray, gamma: float) -> Dict:
 def fitness_power_mean(P: np.ndarray, w: np.ndarray, r: float) -> float:
     """Weighted power mean of task performances with exponent r.
 
-    r = 0 is the geometric mean (the exact limit), returning 0 if any P <= 0.
-    r > 0 weights the best task more, r < 0 the worst. For r <= 0 a
-    non-positive performance makes the mean 0.
+        r = 0 is the geometric mean. For r <= 0 a non-positive performance gives 0.
     """
     if r == 0.0:
         if np.any(P <= 0):
@@ -321,9 +298,7 @@ def fitness_power_mean(P: np.ndarray, w: np.ndarray, r: float) -> float:
 
 def fitness_power_mean_rows(P_rows: np.ndarray, w: np.ndarray,
                             r: float) -> np.ndarray:
-    """Vectorized `fitness_power_mean` over the rows of P_rows. Used for the
-    inner mutant loop; `test_simulate.py` asserts agreement with the scalar
-    version."""
+    """Vectorized `fitness_power_mean` over the rows of P_rows."""
     P_rows = np.asarray(P_rows, dtype=float)
     if r == 0.0:
         bad = np.any(P_rows <= 0, axis=1)
@@ -350,7 +325,8 @@ def selection_coeff(W_mut: float, W_wt: float) -> float:
 
 def selection_coeff_array(W_mut: np.ndarray, W_wt: float) -> np.ndarray:
     """Vectorized `selection_coeff`. A non-positive wild-type fitness makes any
-    positive mutant infinitely favoured, matching the scalar convention."""
+        positive mutant infinitely favoured.
+    """
     W_mut = np.asarray(W_mut, dtype=float)
     if W_wt <= 0:
         return np.where(W_mut > 0, np.inf, 0.0)
@@ -358,8 +334,7 @@ def selection_coeff_array(W_mut: np.ndarray, W_wt: float) -> np.ndarray:
 
 
 def p_fix(s: float, N: int) -> float:
-    """Haploid fixation probability, (1 - e^-2s) / (1 - e^-2Ns), with limiting
-    cases handled for numerical stability. Neutral limit is 1/N."""
+    """Haploid fixation probability, (1 - e^-2s) / (1 - e^-2Ns); neutral limit 1/N."""
     if s <= 0:
         return 0.0
     Ns = N * s
@@ -371,8 +346,7 @@ def p_fix(s: float, N: int) -> float:
 
 
 def p_fix_array(s: np.ndarray, N: int) -> np.ndarray:
-    """Vectorized `p_fix`. Branches are evaluated over disjoint masks so that
-    no expression is computed outside its domain."""
+    """Vectorized `p_fix`."""
     s = np.asarray(s, dtype=float)
     out = np.zeros_like(s)
     pos = s > 0
@@ -404,31 +378,13 @@ def p_fix_array(s: np.ndarray, N: int) -> np.ndarray:
 def beneficial_subset_exists(P_wt: np.ndarray, P_mut: np.ndarray,
                              m: int, r: float) -> bool:
     """Does any single-bit mutant beat the wild type under at least one
-    admissible active subset of size m?
+        admissible active subset of size m? Exact, not sampled.
 
-    The power mean is separable over the active set, so for uniform weights a
-    mutant beats the wild type on subset S iff sum_{j in S} delta_j > 0, with
-
-        delta_j = log P'_j - log P_j            (r = 0)
-        delta_j = P'_j^r  - P_j^r               (r != 0)
-
-    For r < 0 the outer exponent 1/r reverses the inequality. The best case over
-    all subsets is therefore the sum of the m largest delta (r >= 0) or the m
-    smallest (r < 0), which costs O(L*K*T log T) instead of enumerating C(T, m)
-    subsets.
-
-    The separable form assumes the power mean is finite and monotone in each
-    term, which fails when a performance is non-positive and r <= 0 (the mean
-    collapses to 0). Those cases fall back to explicit enumeration, which is
-    exact. With P = max(0, 1 - d)^gamma and d <= 1 by feasibility of a = 0, they
-    do not arise in practice.
-
-    `P_mut` must be the full (L*K, T) table.
-
-    Comparisons are strict, matching `selection_coeff(...) > 0`. The test is
-    deliberately permissive at the margin: declaring a marginal escape that a
-    subsequent draw fails to realize costs a redraw, whereas missing one would
-    terminate a walk that had not finished.
+        Assumes uniform task weights. The power mean is then separable over the
+        active set, so the best subset is the m largest (r >= 0) or m smallest
+        (r < 0) per-task deltas, at O(L*K*T log T) instead of C(T, m) subsets. When
+        r <= 0 and a performance is non-positive the separable form fails and all
+        C(T, m) subsets are enumerated instead. `P_mut` is the full (L*K, T) table.
     """
     T = P_wt.size
     m = min(m, T)
@@ -462,10 +418,10 @@ def beneficial_subset_exists(P_wt: np.ndarray, P_mut: np.ndarray,
 # ============================================================
 
 def modularity_entropy(dF: np.ndarray) -> float:
-    """Mutational modularity, 1 - mean(H) / log(T), over the distribution of
-    each mutation's absolute effects across tasks. M = 1 when every mutation is
-    task-specific, 0 when all affect every task equally. dF is (L*K, T);
-    mutations with no total effect are excluded."""
+    """Mutational modularity, 1 - mean(H) / log(T), over each mutation's absolute
+        effects across tasks. dF is (L*K, T); mutations with no total effect are
+        excluded.
+    """
     T = dF.shape[1]
     if T < 2:
         return float('nan')
@@ -483,8 +439,7 @@ def modularity_entropy(dF: np.ndarray) -> float:
 
 
 def mean_pairwise_phenotype_distance(phenotype: np.ndarray) -> float:
-    """Mean pairwise Euclidean distance between the columns of an (L, T)
-    phenotype array."""
+    """Mean pairwise Euclidean distance between the columns of an (L, T) array."""
     T = phenotype.shape[1]
     if T < 2:
         return 0.0
@@ -517,13 +472,8 @@ def _run_sswm(genome_init: np.ndarray, tasks: np.ndarray, n_subs: int,
               task_sampling: str = 'random', fitness_r: float = 0.0,
               max_redraws: int = 100,
               record_modularity: str = 'snapshots') -> Dict:
-    """Evolve one replicate. See the module docstring for the termination
-    policy, the cost model, and the state/event array convention.
-
-    The loop body computes state k, then attempts the substitution that
-    produces state k+1. Mutant performances are enumerated lazily by task and
-    cached per genotype, so redraws cost only the fitness aggregation and
-    inactive tasks are evaluated only when something needs them.
+    """Evolve one replicate. See the module docstring for termination reasons and
+        the state/event array convention.
     """
     rng = np.random.default_rng(seed)
     L, K = genome_init.shape
@@ -650,8 +600,7 @@ def simulate(genome_init: np.ndarray, tasks: np.ndarray, n_subs: int,
              task_sampling: str = 'random', fitness_r: float = 0.0,
              max_redraws: int = 100,
              record_modularity: str = 'snapshots') -> Dict:
-    """Public entry point. `task_weights` is normalized internally; uniform
-    weights are appropriate for the standard sweep."""
+    """Public entry point. `task_weights` is normalized internally."""
     w = task_weights / task_weights.sum()
     return _run_sswm(genome_init, tasks, n_subs, mu, N, gamma, m=m, w=w,
                      seed=seed, n_genome_snapshots=n_genome_snapshots,
@@ -666,8 +615,7 @@ def simulate(genome_init: np.ndarray, tasks: np.ndarray, n_subs: int,
 
 def n_subs_rule(T: int, m: int, L: int, epochs_per_task: Optional[int] = None,
                 floor: int = 401) -> int:
-    """Substitution budget for one condition. See "Substitution budget" in the
-    module docstring. `epochs_per_task` defaults to L."""
+    """Substitution budget for one condition; `epochs_per_task` defaults to L."""
     E = L if epochs_per_task is None else epochs_per_task
     return max(floor, int(round(E * T / m)) + 1)
 
@@ -693,9 +641,9 @@ def _density_root(cache_dir: str, L: int, K: int, gamma: float,
 
 
 def task_cache_path(cache_dir: str, L: int, T: int) -> str:
-    """Task ensembles depend only on (L, T, dT) and the ensemble seed, so they
-    live outside the parameter root and are shared across K, gamma and
-    fitness_r."""
+    """Path to the task ensembles for (L, T), shared across K, gamma and
+        fitness_r.
+    """
     folder = os.path.join(cache_dir, f'tasks_L{L}_v{SCHEMA_VERSION}')
     os.makedirs(folder, exist_ok=True)
     return os.path.join(folder, f'taskens_T{T}')
@@ -737,8 +685,9 @@ def load_task_ensembles(base_path: str) -> Tuple[Dict, Dict, Dict]:
 
 
 def _flatten_snapshots(snapshots: Dict[int, Dict]) -> Dict[str, np.ndarray]:
-    """Genomes are binary, so they are stored as uint8. Usage and phenotype are
-    recomputable via `expand_snapshot` and are not stored."""
+    """Genomes are stored as uint8; usage and phenotype are recomputed by
+        `expand_snapshot`.
+    """
     flat = {}
     for step, snap in snapshots.items():
         flat[f'snap_{step}_genome'] = snap['genome'].astype(np.uint8)
@@ -753,10 +702,9 @@ def _unflatten_snapshots(arrays: Dict, step_keys: List[int]) -> Dict[int, Dict]:
 
 
 def save_condition(base_path: str, results: List[Dict], params: Dict):
-    """Write all replicates for one condition. Trajectory arrays and flattened
-    snapshots go to npz; per-replicate scalars go to json. Replicates keep an
-    explicit `rep_index` so reassembly order is verifiable rather than implied
-    by array position."""
+    """Write all replicates for one condition: trajectory arrays and flattened
+        snapshots to npz, per-replicate scalars to json.
+    """
     arrays, rep_meta = {}, []
 
     for slot, hist in enumerate(results):
@@ -788,10 +736,8 @@ def load_condition(base_path: str,
                    ) -> Tuple[List[Dict], Dict]:
     """Load a saved condition as (results, params), sorted by rep_index.
 
-    `keep` restricts which trajectory arrays are read. An npz member is only
-    decompressed when it is accessed, so naming the handful of arrays a figure
-    actually needs avoids inflating the rest. Passing None reads everything, as
-    before. Snapshots are read only when 'snapshots' is in `keep`.
+        `keep` restricts which trajectory arrays are read; None reads everything,
+        including snapshots.
     """
     npz = np.load(base_path + '.npz', allow_pickle=False)
     with open(base_path + '_meta.json') as f:
@@ -827,10 +773,7 @@ def load_condition(base_path: str,
 
 
 def cached_condition_spec(base_path: str) -> Optional[Tuple[int, int]]:
-    """(N_SUBS, n_reps) of a cached condition, or None if unreadable. Used to
-    re-run conditions cached at a shallower budget or with fewer replicates;
-    checking only the budget would silently leave a smoke-test condition in
-    place with the wrong replicate count."""
+    """(N_SUBS, n_reps) of a cached condition, or None if unreadable."""
     try:
         with open(base_path + '_meta.json') as f:
             meta = json.load(f)
@@ -846,11 +789,8 @@ def cached_condition_spec(base_path: str) -> Optional[Tuple[int, int]]:
 # ============================================================
 
 def _worker(args: tuple):
-    """Run one chunk of replicates for one condition.
-
-    Chunking affects only which process computes a replicate. Every seed is a
-    pure function of (rep, condition), and no state is carried between
-    replicates, so results are bit-identical to an unchunked run.
+    """Run one chunk of replicates for one condition. Every seed is a pure
+        function of (rep, condition), so chunking does not affect results.
     """
     (T, dT, m, density, alpha, tasks_chunk, rep_start, n_subs, mu, N_pop,
      gamma, K, L, task_weights, n_snaps, task_sampling, fitness_r,
@@ -906,11 +846,9 @@ def ensure_task_ensembles(cache_dir, L, T, task_divs, n_ensembles):
 def resolve_m_values(m_spec, T: int) -> List[int]:
     """Simultaneity levels for one T.
 
-    None         every level, 1 through T.
-    'endpoints'  sequential and simultaneous only, {1, T}. Robustness specs
-                 contrast those two regimes and do not need the intermediate
-                 sweep, which dominates the cost at large T.
-    list         explicit levels, silently dropping any that exceed T.
+        None         every level, 1 through T
+        'endpoints'  sequential and simultaneous only, {1, T}
+        list         explicit levels, dropping any that exceed T
     """
     if m_spec is None:
         return list(range(1, T + 1))
@@ -923,7 +861,8 @@ def resolve_m_values(m_spec, T: int) -> List[int]:
 
 def build_work(cfg: dict, alpha_maps: Dict, ensembles: Dict) -> List[tuple]:
     """Expand the parameter grid into chunked work items, skipping conditions
-    already cached at a sufficient substitution budget."""
+        already cached at a sufficient substitution budget.
+    """
     L, K = cfg['L'], cfg['K']
     gamma, fitness_r = cfg['GAMMA'], cfg['FITNESS_R']
     n_reps, chunk = cfg['N_REPS'], cfg['CHUNK_SIZE']
@@ -973,14 +912,8 @@ def build_work(cfg: dict, alpha_maps: Dict, ensembles: Dict) -> List[tuple]:
 
 
 def estimate_cost(work: List[tuple]) -> Tuple[float, float]:
-    """(total NNLS solves, longest single work item). The second bounds the
-    critical path and is what chunking reduces.
-
-    Counts the wild-type solves, the lazily enumerated active columns, and the
-    full-repertoire enumerations on the snapshot schedule. Failed epochs also
-    force full enumeration and are not predictable, so this is a lower bound;
-    it is tightest where stalls are rare, which is where the runtime is
-    dominated anyway.
+    """(total NNLS solves, longest single work item). A lower bound: failed
+        epochs also force full enumeration and are not predictable.
     """
     per_item = []
     for w in work:
