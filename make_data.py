@@ -4,7 +4,7 @@ make_data.py
 ============
 Generate every simulation condition used by the manuscript and the supplement.
 
-`run_batch.py`'s SPECS cover the baseline and three robustness axes; the two
+`run_batch.py`'s SPECS cover the main analysis and three robustness axes; the
 program-number sweeps were launched with command-line grid overrides that SPECS
 does not record, and are written out explicitly below.
 
@@ -19,7 +19,7 @@ this is safe to re-run and cheap to resume.
 Usage:
   python3 make_data.py --dry_run      # cost estimate for the whole paper
   python3 make_data.py                # run everything
-  python3 make_data.py --only baseline programs_K8
+  python3 make_data.py --only main programs_K8
 """
 import argparse, os, subprocess, sys, time
 
@@ -27,7 +27,7 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 
 # name -> arguments appended to `python3 run_batch.py`
 JOBS = {
-    'baseline':    ['--specs', 'baseline'],
+    'main':        ['--specs', 'main'],
     'density':     ['--specs', 'density'],
     'fitness_r':   ['--specs', 'fitness_r'],
     'gamma':       ['--specs', 'gamma'],
@@ -36,11 +36,11 @@ JOBS = {
     'programs_K8': ['--specs', 'programs', '--K', '8',
                     '--T', '4', '8', '12', '16'],
 }
-ORDER = ['baseline', 'density', 'fitness_r', 'gamma',
+ORDER = ['main', 'density', 'fitness_r', 'gamma',
          'programs_K6', 'programs_K8']
 
 FIGURES_OF = {
-    'baseline':    'Figures 2, 3, 4; S1; S6',
+    'main':        'Figures 2, 3, 4; S1; S6',
     'density':     'S5',
     'fitness_r':   'S2',
     'gamma':       'S3',

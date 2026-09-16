@@ -20,7 +20,7 @@ Usage:
 import argparse, io, os, re, shutil, subprocess, sys, time
 
 REPO = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(REPO, 'figures_out')
+DEFAULT_OUT = os.path.join(REPO, 'figures_out')
 
 # canonical name -> (script or None, arguments, one-line description)
 FIGURES = [
@@ -51,7 +51,7 @@ FIGURES = [
 SAVED = re.compile(r'^Saved:\s*(.+\.\w+)\s*$', re.M)
 
 
-def run_one(name, script, extra, verbose):
+def run_one(name, script, extra, verbose, out):
     if script is None:
         return None
     path = os.path.join(REPO, 'figures', script)
@@ -69,7 +69,7 @@ def run_one(name, script, extra, verbose):
     if not hits:
         raise SystemExit(f'{name}: {script} printed no "Saved:" line')
     produced = hits[-1]
-    canonical = os.path.join(OUT, f'{name}.pdf')
+    canonical = os.path.join(out, f'{name}.pdf')
     if os.path.abspath(produced) != os.path.abspath(canonical):
         # move, so figures_out only ever holds F1-F4 and FS1-FS6
         shutil.move(produced, canonical)
@@ -81,6 +81,8 @@ def main():
     p.add_argument('--only', nargs='+', default=None)
     p.add_argument('--list', action='store_true')
     p.add_argument('--verbose', action='store_true')
+    p.add_argument('--out', default=DEFAULT_OUT,
+                   help='output directory (default: figures_out/)')
     args = p.parse_args()
 
     if args.list:
@@ -88,20 +90,21 @@ def main():
             print(f'  {name:<4} {script or "(hand-made)":<20} {desc}')
         return
 
-    os.makedirs(OUT, exist_ok=True)
+    out = os.path.abspath(args.out)
+    os.makedirs(out, exist_ok=True)
     todo = [f for f in FIGURES if args.only is None or f[0] in args.only]
     t0 = time.time()
     made = 0
     for name, script, extra, desc in todo:
         t = time.time()
-        path = run_one(name, script, extra, args.verbose)
+        path = run_one(name, script, extra, args.verbose, out)
         if path is None:
             print(f'{name:<4} {"skipped":<12} {"":>6}    {desc}', flush=True)
             continue
         made += 1
         print(f'{name:<4} {os.path.basename(path):<12} '
               f'{time.time() - t:6.1f}s   {desc}', flush=True)
-    print(f'\n{made} figures in {time.time() - t0:.0f}s -> {OUT}')
+    print(f'\n{made} figures in {time.time() - t0:.0f}s -> {out}')
 
 
 if __name__ == '__main__':

@@ -44,12 +44,25 @@ _SANS_PREFERENCE = ('Helvetica', 'Nimbus Sans', 'Arial', 'Liberation Sans',
                     'Arimo', 'DejaVu Sans')
 
 
+def _is_bold(entry) -> bool:
+    w = entry.weight
+    return w in ('bold', 'heavy', 'black') or (isinstance(w, (int, float)) and w >= 600)
+
+
 def sans_family() -> str:
-    """First available Helvetica-metric family on this machine."""
+    """First available Helvetica-metric family on this machine that registers a
+        bold and an italic face. A family offering only its regular face is
+        skipped: matplotlib silently renders bold titles and italic math at
+        regular weight, which changes the figure without failing.
+    """
     from matplotlib import font_manager
-    have = {f.name for f in font_manager.fontManager.ttflist}
+    faces = {}
+    for f in font_manager.fontManager.ttflist:
+        has_bold, has_italic = faces.get(f.name, (False, False))
+        faces[f.name] = (has_bold or _is_bold(f),
+                         has_italic or f.style in ('italic', 'oblique'))
     for name in _SANS_PREFERENCE:
-        if name in have:
+        if all(faces.get(name, (False, False))):
             return name
     return 'DejaVu Sans'
 
@@ -194,8 +207,8 @@ def load_grid(spec: CacheSpec, m_values=None, verbose: bool = True,
               slim: bool = True) -> Dict[int, Dict[float, Dict[int, List]]]:
     """{T: {dT: {m: replicates}}} for everything present in the cache.
 
-        Missing conditions are skipped with a warning rather than raising. See
-        `wanted_m` for the selector forms accepted by `m_values`.
+        Missing conditions are skipped with a warning; an entirely empty cache
+        exits. See `wanted_m` for the selector forms accepted by `m_values`.
     """
     alpha_maps = load_alpha_maps(spec)
     data: Dict[int, Dict[float, Dict[int, List]]] = {}
@@ -224,6 +237,11 @@ def load_grid(spec: CacheSpec, m_values=None, verbose: bool = True,
             if verbose and data[T][dT]:
                 print(f'  T={T} dT={dT}: m={sorted(data[T][dT])} '
                       f'({len(next(iter(data[T][dT].values())))} reps)')
+
+    if not any(ms for ts in data.values() for ms in ts.values()):
+        raise SystemExit(
+            f'No cached conditions found under {spec.cache_dir}.\n'
+            'Build the simulation cache first:  python3 make_data.py')
     return data
 
 

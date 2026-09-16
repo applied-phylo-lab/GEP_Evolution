@@ -8,7 +8,7 @@ One `simulate.run_simulations` call covers a single (L, K, gamma, fitness_r)
 combination, since those four determine the cache root; genome density is a
 subdirectory inside it, so densities sweep within one call.
 
-  baseline    K=4, gamma=1, r=0,  density 0.25, all m      -> Figs 2-4, S1, S6
+  main        K=4, gamma=1, r=0,  density 0.25, all m      -> Figs 2-4, S1, S6
   density     K=4, gamma=1, r=0,  density 0.5,  m in {1,T} -> S5
   fitness_r   K=4, gamma=1, r=-2, density 0.25, m in {1,T} -> S2
   gamma       K=4, gamma=4, r=0,  density 0.25, m in {1,T} -> S3
@@ -22,7 +22,7 @@ preferred entry point, because SPECS alone does not reproduce them.
 
 Usage:
   python3 run_batch.py --dry_run
-  python3 run_batch.py --specs baseline
+  python3 run_batch.py --specs main
 """
 
 import os
@@ -68,7 +68,7 @@ BASE_CFG = dict(
 )
 
 SPECS = {
-    'baseline': dict(
+    'main': dict(
         GENOME_DENSITIES=[0.25],
     ),
     'density': dict(
@@ -89,10 +89,10 @@ SPECS = {
     ),
 }
 
-SPEC_ORDER = ['baseline', 'density', 'fitness_r', 'gamma', 'programs']
+SPEC_ORDER = ['main', 'density', 'fitness_r', 'gamma', 'programs']
 
 SPEC_NOTES = {
-    'baseline': 'main figures, and every re-indexed supplementary analysis',
+    'main': 'the main analysis: main figures, and every re-indexed supplementary analysis',
     'density': 'denser initial genotype matrix',
     'fitness_r': 'negative power mean, isolating fitness aggregation',
     'gamma': 'steeper performance decline, isolating curvature',

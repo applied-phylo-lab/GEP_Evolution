@@ -1,0 +1,37 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite both the software and the paper."
+title: "GEP_Evolution: simulation code for Kim & Pennell"
+abstract: >-
+  Strong-selection weak-mutation simulations of gene expression program
+  evolution in which the number of task-specific phenotypes contributing
+  jointly to fitness is varied between sequential (m = 1) and simultaneous
+  (m = T) selection.
+type: software
+authors:
+  - given-names: Mark
+    family-names: Kim
+    email: mk2687@cornell.edu
+    affiliation: "Department of Computational Biology, Cornell University, United States"
+  - given-names: Matt
+    family-names: Pennell
+    affiliation: "Department of Computational Biology, Cornell University, United States"
+repository-code: "https://github.com/applied-phylo-lab/GEP_Evolution"
+license: MIT
+version: 1.0.0
+date-released: "2026-09-16"
+keywords:
+  - gene expression evolution
+  - multicellularity
+  - adaptive walk
+  - phenotypic differentiation
+  - toolbox model
+preferred-citation:
+  type: article
+  title: "Unicellular and Multicellular Modes of Selection Impose Distinct Constraints on Cellular Phenotype Evolution"
+  authors:
+    - given-names: Mark
+      family-names: Kim
+    - given-names: Matt
+      family-names: Pennell
+  journal: "Molecular Biology and Evolution"
+  year: 2026

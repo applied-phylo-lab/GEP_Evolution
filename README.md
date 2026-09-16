@@ -1,7 +1,6 @@
-# GEP_Evolution
+# Unicellular and Multicellular Modes of Selection Impose Distinct Constraints on Cellular Phenotype Evolution
 
-Simulation code for *Unicellular and Multicellular Modes of Selection Impose
-Distinct Constraints on Cellular Phenotype Evolution* (Kim & Pennell).
+Simulation code for Kim & Pennell.
 
 A genome is a binary matrix `G` in {0,1}^(L x K) mapping `L` loci onto `K` gene
 expression programs. For each of `T` tasks it deploys the non-negative program
@@ -52,11 +51,11 @@ compared after equal selective epochs per task rather than equal substitutions.
     python3 make_figures.py            # every figure, under its canonical name
 
 `make_data.py` is the entry point for the full study. `run_batch.py`'s named
-specs cover the baseline and the robustness axes but not the two program-number
+specs cover the main analysis and the robustness axes but not the two program-number
 sweeps, whose task grids are given on the command line. Individual pieces can
 still be run directly:
 
-    python3 run_batch.py --specs baseline
+    python3 run_batch.py --specs main
     python3 figures/fig_tsweep.py --which F2 --plain_name
 
 Figure scripts put the repository root on `sys.path` and anchor their default
@@ -71,9 +70,25 @@ Task numbers are matched on the task-to-program ratio T/K = 0.5, 1, 1.5, 2:
     K = 6   T = 3, 6, 9, 12
     K = 8   T = 4, 8, 12, 16
 
-Baseline: L = 100, K = 4, gamma = 1, r = 0, rho = 0.25, N = 1e4, mu = 1e-7,
+Main analysis: L = 100, K = 4, gamma = 1, r = 0, rho = 0.25, N = 1e4, mu = 1e-7,
 200 replicates per condition. The K sweep holds rho at 0.25 rather than at 1/K,
 so that program number varies without also changing genotype-matrix density.
+
+## How to cite
+
+Please cite the paper, and the archived software release if you use the code:
+
+> Kim M, Pennell M. Unicellular and Multicellular Modes of Selection Impose
+> Distinct Constraints on Cellular Phenotype Evolution. *Molecular Biology and
+> Evolution* (2026). doi:FILL IN
+
+> Kim M, Pennell M. GEP_Evolution: simulation code (2026).
+> Zenodo. doi:FILL IN
+
+`CITATION.cff` carries the same information in machine-readable form; GitHub
+renders it under "Cite this repository".
+
+Questions about the code: Mark Kim <mk2687@cornell.edu>.
 
 ## License
 
