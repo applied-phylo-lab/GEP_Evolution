@@ -18,20 +18,19 @@ interpolates.
     make_data.py       regenerate every simulated condition   (entry point)
     make_figures.py    regenerate every figure                (entry point)
     figures/           one script per manuscript figure
-    tests/             52 checks on the engine
-    assets/            hand-made figure sources (git-ignored, not reproducible)
+    tests/             engine invariants and figure regression checks
     figures_out/       generated figures (git-ignored, reproducible)
     simulation_cache/  trajectories (git-ignored, ~5 GB, rebuild with make_data.py)
 
 Everything in `figures_out/` and `simulation_cache/` can be rebuilt from source.
-The hand-made figure sources in `assets/` cannot, and are kept outside version
-control; the composited PDFs are distributed with the manuscript.
+Figure 1 is a hand-drawn schematic with no data behind it; it is not generated
+here and is distributed with the manuscript.
 
 ## Which script makes which figure
 
 | Figure | Script | Command |
 |---|---|---|
-| 1  | none — hand-made | `assets/F1.pdf` |
+| 1  | none — hand-drawn schematic  | — |
 | 2  | `figures/fig_tsweep.py`      | `--which F2 --plain_name` |
 | 3  | `figures/fig_tsweep.py`      | `--which F3 --plain_name` |
 | 4  | `figures/fig_m_by_tasks.py`  | `--plain_name` |
@@ -42,14 +41,22 @@ control; the composited PDFs are distributed with the manuscript.
 | S5 | `figures/fig_regimes.py`     | `--density 0.5` |
 | S6 | `figures/fig_msweep.py`      | |
 
-Every figure script also accepts `--cutoff_kind exposure`, which compares
-conditions after equal selective epochs per task rather than equal
-substitutions.
+Every figure script except `fig_termination.py`, which plots whole
+trajectories, also accepts `--cutoff_kind exposure`: conditions are then
+compared after equal selective epochs per task rather than equal substitutions.
 
 ## Reproducing
 
-    python3 run_batch.py --specs baseline --dry_run   # cost estimate
-    python3 run_batch.py --specs baseline             # ~5 GB of trajectories
+    python3 make_data.py --dry_run     # cost estimate for the whole study
+    python3 make_data.py               # ~5 GB of trajectories
+    python3 make_figures.py            # every figure, under its canonical name
+
+`make_data.py` is the entry point for the full study. `run_batch.py`'s named
+specs cover the baseline and the robustness axes but not the two program-number
+sweeps, whose task grids are given on the command line. Individual pieces can
+still be run directly:
+
+    python3 run_batch.py --specs baseline
     python3 figures/fig_tsweep.py --which F2 --plain_name
 
 Figure scripts put the repository root on `sys.path` and anchor their default

@@ -10,3 +10,4 @@ _relegated/
 *.bak
 Claude outputs/
 assets/
+batch_manifest_*.json

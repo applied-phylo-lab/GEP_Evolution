@@ -8,7 +8,7 @@ the LaTeX source expects.
 Each figure script prints `Saved: <path>`; this runner reads that line and moves
 the result to its canonical name, so figures_out holds only F1-F4 and FS1-FS6.
 Running a figure script directly produces its parameterised name instead.
-Figure 1 is hand-made and is copied from assets/.
+Figure 1 is a hand-made schematic and is not generated here.
 
 Requires the simulation cache; build it with `python3 make_data.py`.
 
@@ -25,7 +25,7 @@ OUT = os.path.join(REPO, 'figures_out')
 # canonical name -> (script or None, arguments, one-line description)
 FIGURES = [
     ('F1',  None,                  [],
-     'schematic (hand-made, copied from assets/)'),
+     'schematic (hand-made, not generated)'),
     ('F2',  'fig_tsweep.py',       ['--which', 'F2'],
      'sequential selection, m = 1, two cutoffs'),
     ('F3',  'fig_tsweep.py',       ['--which', 'F3'],
@@ -53,10 +53,7 @@ SAVED = re.compile(r'^Saved:\s*(.+\.\w+)\s*$', re.M)
 
 def run_one(name, script, extra, verbose):
     if script is None:
-        src = os.path.join(REPO, 'assets', 'F1.pdf')
-        dst = os.path.join(OUT, 'F1.pdf')
-        shutil.copy2(src, dst)
-        return dst
+        return None
     path = os.path.join(REPO, 'figures', script)
     # Not every script defines --no_summary; ask the script itself.
     src = io.open(path, encoding='utf-8').read()
@@ -94,12 +91,17 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     todo = [f for f in FIGURES if args.only is None or f[0] in args.only]
     t0 = time.time()
+    made = 0
     for name, script, extra, desc in todo:
         t = time.time()
         path = run_one(name, script, extra, args.verbose)
+        if path is None:
+            print(f'{name:<4} {"skipped":<12} {"":>6}    {desc}', flush=True)
+            continue
+        made += 1
         print(f'{name:<4} {os.path.basename(path):<12} '
               f'{time.time() - t:6.1f}s   {desc}', flush=True)
-    print(f'\n{len(todo)} figures in {time.time() - t0:.0f}s -> {OUT}')
+    print(f'\n{made} figures in {time.time() - t0:.0f}s -> {OUT}')
 
 
 if __name__ == '__main__':
