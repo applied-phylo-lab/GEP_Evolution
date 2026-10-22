@@ -11,3 +11,4 @@ _relegated/
 Claude outputs/
 assets/
 batch_manifest_*.json
+wf_out/
